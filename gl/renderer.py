@@ -47,11 +47,11 @@ class Renderer:
         glDepthFunc(GL_LESS)
         
         # 启用面剔除
-        glEnable(GL_CULL_FACE)
-        glCullFace(GL_BACK)
+        # glEnable(GL_CULL_FACE)
+        # glCullFace(GL_BACK)
         
         # 设置背景色
-        glClearColor(0.8, 0.8, 0.8, 1.0)
+        glClearColor(0.2, 0.2, 0.2, 1.0)
         
         # 启用光照
         glEnable(GL_LIGHTING)
@@ -95,11 +95,17 @@ class Renderer:
                     # 如果没有面数据，创建默认法向量
                     self.normals = np.zeros_like(vertices, dtype=np.float32)
             
-            # 处理颜色
+            # 处理颜色 - 如果没有颜色数据，则生成随机颜色
             if colors is not None and len(colors) > 0:
                 self.colors = colors.astype(np.float32)
             else:
-                self.colors = np.full_like(vertices, 0.7, dtype=np.float32)
+                # 生成美观的随机颜色
+                print("未提供颜色数据，生成随机颜色")
+                # 使用固定的随机种子以确保每次运行结果一致
+                np.random.seed(42)
+                self.colors = np.random.rand(len(vertices), 3).astype(np.float32)
+                # 重置随机种子
+                np.random.seed(None)
             
             # 准备边数据（用于线框模式）
             if len(indices) > 0:
@@ -130,12 +136,17 @@ class Renderer:
         self.data_type = 'point_cloud'
         self.vertices = points.astype(np.float32)
         
-        # 处理颜色
-        if colors is not None:
+        # 处理颜色 - 如果没有颜色数据，则生成随机颜色
+        if colors is not None and len(colors) > 0:
             self.colors = colors.astype(np.float32)
         else:
-            # 默认灰色
-            self.colors = np.full_like(points, 0.7, dtype=np.float32)
+            # 生成美观的随机颜色
+            print("未提供点云颜色数据，生成随机颜色")
+            # 使用固定的随机种子以确保每次运行结果一致
+            np.random.seed(42)
+            self.colors = np.random.rand(len(points), 3).astype(np.float32)
+            # 重置随机种子
+            np.random.seed(None)
     
     def _compute_normals(self, vertices, indices):
         """计算顶点法向量"""
