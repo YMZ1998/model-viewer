@@ -5,6 +5,7 @@ Mesh 文件加载器
 import numpy as np
 import struct
 import os
+import plyfile
 
 
 class MeshLoader:
@@ -36,6 +37,168 @@ class MeshLoader:
             return MeshLoader._load_ply_mesh(file_path)
         else:
             raise ValueError(f"Unsupported mesh format: {ext}")
+    
+    @staticmethod
+    def _load_ply_mesh(file_path):
+        """使用plyfile库加载PLY Mesh文件"""
+        try:
+            # 使用plyfile库读取PLY文件
+            plydata = plyfile.PlyData.read(file_path)
+            
+            # 获取顶点数据
+            vertex_data = plydata['vertex']
+            num_vertices = vertex_data.count
+            
+            # 提取顶点坐标
+            x = vertex_data.data['x'] if 'x' in vertex_data.data.dtype.names else np.zeros(num_vertices)
+            y = vertex_data.data['y'] if 'y' in vertex_data.data.dtype.names else np.zeros(num_vertices)
+            z = vertex_data.data['z'] if 'z' in vertex_data.data.dtype.names else np.zeros(num_vertices)
+            vertices = np.column_stack((x, y, z)).astype(np.float32)
+            
+            # 提取颜色数据（如果存在）
+            colors = None
+            if 'red' in vertex_data.data.dtype.names and 'green' in vertex_data.data.dtype.names and 'blue' in vertex_data.data.dtype.names:
+                r = vertex_data.data['red']
+                g = vertex_data.data['green']
+                b = vertex_data.data['blue']
+                # 检查颜色值范围，如果是0-255则需要归一化
+                if r.max() > 1.0 or g.max() > 1.0 or b.max() > 1.0:
+                    colors = np.column_stack((r/255.0, g/255.0, b/255.0)).astype(np.float32)
+                else:
+                    colors = np.column_stack((r, g, b)).astype(np.float32)
+            
+            # 提取面数据（如果存在）
+            indices = np.array([], dtype=np.uint32)
+            if 'face' in plydata:
+                face_data = plydata['face']
+                faces = []
+                for face in face_data.data['vertex_indices']:
+                    # 确保face是一个数组
+                    if isinstance(face, np.ndarray):
+                        face_array = face
+                    else:
+                        # 如果face不是数组，假设它是一个元组或列表
+                        face_array = np.array(face)
+                    
+                    # 三角化多边形面
+                    for i in range(1, len(face_array) - 1):
+                        faces.append([face_array[0], face_array[i], face_array[i+1]])
+                indices = np.array(faces, dtype=np.uint32)
+            
+            # 计算法向量
+            normals = None
+            if len(indices) > 0:
+                normals = MeshLoader._compute_normals(vertices, indices)
+            
+            print(f"PLY文件加载完成: 顶点={len(vertices)}, 面={len(indices)}, 有颜色={colors is not None}")
+            
+            return {
+                'vertices': vertices,
+                'indices': indices,
+                'normals': normals,
+                'colors': colors
+            }
+        except Exception as e:
+            print(f"使用plyfile库加载PLY文件失败: {e}")
+            import traceback
+            traceback.print_exc()
+            # 回退到原来的实现
+            return MeshLoader._load_ply_mesh_legacy(file_path)
+    
+    @staticmethod
+    def _load_ply_mesh_legacy(file_path):
+        """加载 PLY Mesh 文件（原始实现）"""
+        vertices = []
+        indices = []
+        colors = []
+        has_color = False
+        
+        with open(file_path, 'rb') as f:
+            # 读取头部
+            line = f.readline().decode('ascii').strip()
+            if line != 'ply':
+                raise ValueError("Not a PLY file")
+            
+            format_binary = False
+            vertex_count = 0
+            face_count = 0
+            
+            # 读取头部信息
+            while True:
+                line = f.readline().decode('ascii').strip()
+                if line.startswith('format'):
+                    if 'binary' in line:
+                        format_binary = True
+                elif line.startswith('element vertex'):
+                    vertex_count = int(line.split()[-1])
+                elif line.startswith('element face'):
+                    face_count = int(line.split()[-1])
+                elif line.startswith('property') and ('red' in line or 'r' in line):
+                    has_color = True
+                elif line == 'end_header':
+                    break
+            
+            print(f"PLY文件信息: 顶点数={vertex_count}, 面数={face_count}, 格式={'binary' if format_binary else 'ascii'}, 有颜色={has_color}")
+            
+            # 读取顶点
+            for i in range(vertex_count):
+                if format_binary:
+                    v = struct.unpack('fff', f.read(12))
+                    vertices.append(v)
+                    if has_color:
+                        try:
+                            c = struct.unpack('BBB', f.read(3))
+                            colors.append([c[0]/255.0, c[1]/255.0, c[2]/255.0])
+                        except:
+                            # 如果读取颜色失败，使用默认颜色
+                            colors.append([0.7, 0.7, 0.7])
+                else:
+                    line = f.readline().decode('ascii').strip().split()
+                    vertices.append([float(line[0]), float(line[1]), float(line[2])])
+                    if has_color and len(line) >= 6:
+                        colors.append([float(line[3])/255.0, float(line[4])/255.0, float(line[5])/255.0])
+            
+            # 读取面
+            for i in range(face_count):
+                if format_binary:
+                    try:
+                        count = struct.unpack('B', f.read(1))[0]
+                        face = struct.unpack(f'{count}I', f.read(4 * count))
+                        if count >= 3:
+                            for j in range(1, count - 1):
+                                indices.append([face[0], face[j], face[j+1]])
+                    except Exception as e:
+                        print(f"读取面数据时出错: {e}")
+                        # 跳过这个面
+                        continue
+                else:
+                    try:
+                        line = f.readline().decode('ascii').strip().split()
+                        count = int(line[0])
+                        face = [int(line[k+1]) for k in range(count)]
+                        for j in range(1, count - 1):
+                            indices.append([face[0], face[j], face[j+1]])
+                    except Exception as e:
+                        print(f"读取面数据时出错: {e}")
+                        # 跳过这个面
+                        continue
+        
+        if not vertices:
+            raise ValueError("PLY文件中没有找到顶点数据")
+        
+        vertices = np.array(vertices, dtype=np.float32)
+        indices = np.array(indices, dtype=np.uint32) if indices else np.array([], dtype=np.uint32)
+        normals = MeshLoader._compute_normals(vertices, indices) if len(indices) > 0 else None
+        
+        result = {
+            'vertices': vertices,
+            'indices': indices,
+            'normals': normals,
+            'colors': np.array(colors, dtype=np.float32) if colors else None
+        }
+        
+        print(f"PLY加载完成: 顶点={len(vertices)}, 面={len(indices)}, 有颜色={result['colors'] is not None}")
+        return result
     
     @staticmethod
     def _load_obj(file_path):
@@ -186,80 +349,6 @@ class MeshLoader:
             'normals': normals,
             'colors': None
         }
-    
-    @staticmethod
-    def _load_ply_mesh(file_path):
-        """加载 PLY Mesh 文件（简化版本）"""
-        vertices = []
-        indices = []
-        colors = []
-        has_color = False
-        
-        with open(file_path, 'rb') as f:
-            # 读取头部
-            line = f.readline().decode('ascii').strip()
-            if line != 'ply':
-                raise ValueError("Not a PLY file")
-            
-            format_binary = False
-            vertex_count = 0
-            face_count = 0
-            
-            while True:
-                line = f.readline().decode('ascii').strip()
-                if line.startswith('format'):
-                    if 'binary' in line:
-                        format_binary = True
-                elif line.startswith('element vertex'):
-                    vertex_count = int(line.split()[-1])
-                elif line.startswith('element face'):
-                    face_count = int(line.split()[-1])
-                elif line.startswith('property') and 'red' in line:
-                    has_color = True
-                elif line == 'end_header':
-                    break
-            
-            # 读取顶点
-            for i in range(vertex_count):
-                if format_binary:
-                    v = struct.unpack('fff', f.read(12))
-                    vertices.append(v)
-                    if has_color:
-                        c = struct.unpack('BBB', f.read(3))
-                        colors.append([c[0]/255.0, c[1]/255.0, c[2]/255.0])
-                else:
-                    line = f.readline().decode('ascii').strip().split()
-                    vertices.append([float(line[0]), float(line[1]), float(line[2])])
-                    if has_color and len(line) >= 6:
-                        colors.append([float(line[3])/255.0, float(line[4])/255.0, float(line[5])/255.0])
-            
-            # 读取面
-            for i in range(face_count):
-                if format_binary:
-                    count = struct.unpack('B', f.read(1))[0]
-                    face = struct.unpack(f'{count}I', f.read(4 * count))
-                    if count >= 3:
-                        for j in range(1, count - 1):
-                            indices.append([face[0], face[j], face[j+1]])
-                else:
-                    line = f.readline().decode('ascii').strip().split()
-                    count = int(line[0])
-                    face = [int(line[k+1]) for k in range(count)]
-                    for j in range(1, count - 1):
-                        indices.append([face[0], face[j], face[j+1]])
-        
-        vertices = np.array(vertices, dtype=np.float32)
-        indices = np.array(indices, dtype=np.uint32)
-        normals = MeshLoader._compute_normals(vertices, indices)
-        
-        result = {
-            'vertices': vertices,
-            'indices': indices,
-            'normals': normals,
-            'colors': np.array(colors, dtype=np.float32) if colors else None
-        }
-        
-        return result
     
     @staticmethod
     def _compute_normals(vertices, indices):

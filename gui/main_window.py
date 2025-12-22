@@ -82,8 +82,6 @@ class MainWindow(QMainWindow):
         from PyQt5.QtWidgets import QMessageBox
         QMessageBox.about(self, "关于 PyQtGLMeshViewer",
                          "PyQtGLMeshViewer v1.0\n\n"
-                         "基于 PyQt5 和 OpenGL Core Profile 3.3 的 3D 模型查看器\n"
-                         "支持 Mesh (.obj, .stl, .ply) 和 Point Cloud (.ply, .xyz) 格式\n\n"
                          "快捷键:\n"
                          "  R - 重置视角\n"
                          "  W - 切换线框模式\n"

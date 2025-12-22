@@ -67,6 +67,17 @@ class ControlPanel(QWidget):
         mesh_layout.addWidget(mesh_color_label)
         mesh_layout.addWidget(self.mesh_color_combo)
         
+        # 线条宽度
+        line_width_label = QLabel(f"线条宽度: {2.0:.1f}")
+        self.line_width_label = line_width_label
+        self.line_width_slider = QSlider(Qt.Horizontal)
+        self.line_width_slider.setMinimum(10)  # 1.0 * 10
+        self.line_width_slider.setMaximum(50)  # 5.0 * 10
+        self.line_width_slider.setValue(20)    # 2.0 * 10
+        self.line_width_slider.valueChanged.connect(self._on_line_width_changed)
+        mesh_layout.addWidget(line_width_label)
+        mesh_layout.addWidget(self.line_width_slider)
+        
         self.mesh_group.setLayout(mesh_layout)
         self.mesh_group.setVisible(False)
         layout.addWidget(self.mesh_group)
@@ -90,7 +101,8 @@ class ControlPanel(QWidget):
         self.point_size_slider.setMinimum(5)
         self.point_size_slider.setMaximum(100)
         self.point_size_slider.setValue(20)  # 2.0 * 10
-        self.point_size_slider.valueChanged.connect(self._on_point_size_changed)
+        # 注意：这里应该连接信号，但在当前代码中被注释掉了
+        # self.point_size_slider.valueChanged.connect(self._on_point_size_changed)
         pc_layout.addWidget(point_size_label)
         pc_layout.addWidget(self.point_size_slider)
         
@@ -152,23 +164,29 @@ class ControlPanel(QWidget):
         """
         try:
             ext = os.path.splitext(file_path)[1].lower()
+            print(f"尝试加载文件: {file_path}, 扩展名: {ext}")
             
             # 判断文件类型
             if ext in ['.obj', '.stl', '.ply']:
                 # 尝试作为 Mesh 加载
                 try:
+                    print("尝试作为Mesh加载...")
                     data = MeshLoader.load(file_path)
                     self._load_mesh_data(data, file_path)
                     return
                 except Exception as e:
+                    print(f"作为Mesh加载失败: {e}")
                     if ext == '.ply':
                         # 如果是 PLY 文件，尝试作为点云加载
                         try:
+                            print("尝试作为点云加载...")
                             data = PointCloudLoader.load(file_path)
                             self._load_point_cloud_data(data, file_path)
                             return
-                        except:
-                            pass
+                        except Exception as e2:
+                            print(f"作为点云加载也失败: {e2}")
+                            # 如果两种方式都失败，抛出第一个异常
+                            raise e
                     raise e
             
             elif ext in ['.xyz']:
@@ -181,7 +199,11 @@ class ControlPanel(QWidget):
         
         except Exception as e:
             # 显示错误对话框
-            QMessageBox.critical(self, "加载失败", f"无法加载文件:\n{str(e)}")
+            error_msg = f"无法加载文件:\n{str(e)}"
+            print(error_msg)
+            import traceback
+            traceback.print_exc()
+            QMessageBox.critical(self, "加载失败", error_msg)
             return
     
     def _load_mesh_data(self, data, file_path):
@@ -196,6 +218,7 @@ class ControlPanel(QWidget):
         
         # 重置视角以适应模型
         self.gl_widget.renderer.reset_view()
+        print("视角重置完成")
         
         self.current_file_path = file_path
         self.data_type = 'mesh'
@@ -279,3 +302,9 @@ class ControlPanel(QWidget):
         size = value / 10.0
         self.point_size_label.setText(f"点大小: {size:.1f}")
         self.gl_widget.set_point_size(size)
+
+    def _on_line_width_changed(self, value):
+        """线条宽度改变"""
+        width = value / 10.0
+        self.line_width_label.setText(f"线条宽度: {width:.1f}")
+        self.gl_widget.set_line_width(width)

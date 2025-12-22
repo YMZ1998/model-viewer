@@ -140,3 +140,8 @@ class GLWidget(QOpenGLWidget):
         """设置点大小"""
         self.renderer.set_point_size(size)
         self.update()
+    
+    def set_line_width(self, width):
+        """设置线框模式线条宽度"""
+        self.renderer.line_width = width
+        self.update()

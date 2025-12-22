@@ -4,10 +4,8 @@ OpenGL 渲染器
 """
 from OpenGL.GL import *
 import numpy as np
-import os
+# import os  # 不再需要
 
-from gl.shader import Shader
-from gl.buffers import VertexArray, VertexBuffer, IndexBuffer
 from gl.camera import Camera
 from math_utils.trackball import Trackball
 
@@ -26,21 +24,12 @@ class Renderer:
         self.camera = Camera(width, height)
         self.trackball = Trackball()
         
-        # 着色器程序（将在 initialize 中创建）
-        self.mesh_shader = None
-        self.point_shader = None
-        
         # 渲染状态
         self.data_type = None  # 'mesh' or 'point_cloud'
         self.render_mode = 'surface'  # 'surface', 'wireframe', 'surface+wireframe'
         self.color_mode = 'uniform'  # 'uniform', 'vertex'
         self.point_size = 2.0
-        
-        # OpenGL 对象
-        self.vao = None
-        self.vbo = None
-        self.ebo = None
-        self.edge_ebo = None
+        self.line_width = 2.0  # 线框模式线条宽度
         
         # 数据
         self.vertices = None
@@ -64,6 +53,19 @@ class Renderer:
         # 设置背景色
         glClearColor(0.8, 0.8, 0.8, 1.0)
         
+        # 启用光照
+        glEnable(GL_LIGHTING)
+        glEnable(GL_LIGHT0)
+        
+        # 设置光源
+        glLightfv(GL_LIGHT0, GL_POSITION, [2.0, 2.0, 2.0, 1.0])
+        glLightfv(GL_LIGHT0, GL_DIFFUSE, [1.0, 1.0, 1.0, 1.0])
+        glLightfv(GL_LIGHT0, GL_AMBIENT, [0.2, 0.2, 0.2, 1.0])
+        
+        # 启用颜色材质
+        glEnable(GL_COLOR_MATERIAL)
+        glColorMaterial(GL_FRONT_AND_BACK, GL_AMBIENT_AND_DIFFUSE)
+        
         self.initialized = True
     
     def load_mesh_data(self, vertices, indices, normals=None, colors=None):
@@ -76,30 +78,46 @@ class Renderer:
             normals: 顶点法向量 (N, 3)
             colors: 顶点颜色 (N, 3)
         """
-        self._cleanup_resources()
-        
-        self.data_type = 'mesh'
-        self.vertices = vertices.astype(np.float32)
-        self.indices = indices.flatten().astype(np.uint32)
-        
-        # 处理法向量
-        if normals is not None:
-            self.normals = normals.astype(np.float32)
-        else:
-            self.normals = self._compute_normals(vertices, indices)
-        
-        # 处理颜色
-        if colors is not None:
-            self.colors = colors.astype(np.float32)
-        else:
-            self.colors = np.full_like(vertices, 0.7, dtype=np.float32)
-        
-        # 准备边数据（用于线框模式）
-        self._prepare_mesh_edges(indices)
-        
-        # 创建 OpenGL 缓冲区（如果已初始化）
-        if self.initialized:
-            self._create_mesh_buffers()
+        try:
+            print(f"load_mesh_data调用: 顶点数={len(vertices)}, 面数={len(indices)}")
+            
+            self.data_type = 'mesh'
+            self.vertices = vertices.astype(np.float32)
+            self.indices = indices.flatten().astype(np.uint32) if len(indices) > 0 else np.array([], dtype=np.uint32)
+            
+            # 处理法向量
+            if normals is not None and len(normals) > 0:
+                self.normals = normals.astype(np.float32)
+            else:
+                if len(indices) > 0:
+                    self.normals = self._compute_normals(vertices, indices)
+                else:
+                    # 如果没有面数据，创建默认法向量
+                    self.normals = np.zeros_like(vertices, dtype=np.float32)
+            
+            # 处理颜色
+            if colors is not None and len(colors) > 0:
+                self.colors = colors.astype(np.float32)
+            else:
+                self.colors = np.full_like(vertices, 0.7, dtype=np.float32)
+            
+            # 准备边数据（用于线框模式）
+            if len(indices) > 0:
+                self._prepare_mesh_edges(indices)
+            else:
+                self.edges = None
+            print(f"边数据生成完成: 边数={len(self.edges) if self.edges is not None else 0}")
+        except Exception as e:
+            print(f"加载mesh数据时出错: {e}")
+            import traceback
+            traceback.print_exc()
+            # 重置状态
+            self.data_type = None
+            self.vertices = None
+            self.indices = None
+            self.normals = None
+            self.colors = None
+            self.edges = None
     
     def load_point_cloud_data(self, points, colors=None):
         """
@@ -109,8 +127,6 @@ class Renderer:
             points: 点坐标 (N, 3)
             colors: 点颜色 (N, 3)
         """
-        self._cleanup_resources()
-        
         self.data_type = 'point_cloud'
         self.vertices = points.astype(np.float32)
         
@@ -120,10 +136,6 @@ class Renderer:
         else:
             # 默认灰色
             self.colors = np.full_like(points, 0.7, dtype=np.float32)
-        
-        # 创建 OpenGL 缓冲区（如果已初始化）
-        if self.initialized:
-            self._create_point_buffers()
     
     def _compute_normals(self, vertices, indices):
         """计算顶点法向量"""
@@ -149,76 +161,29 @@ class Renderer:
     
     def _prepare_mesh_edges(self, indices):
         """准备 Mesh 边数据"""
-        edges = set()
-        for tri in indices:
-            edges.add(tuple(sorted([tri[0], tri[1]])))
-            edges.add(tuple(sorted([tri[1], tri[2]])))
-            edges.add(tuple(sorted([tri[2], tri[0]])))
-        
-        self.edges = np.array(list(edges), dtype=np.uint32).flatten()
-    
-    def _create_mesh_buffers(self):
-        """创建 Mesh 缓冲区"""
-        # 确保着色器已创建
-        if self.mesh_shader is None:
-            shader_dir = os.path.join(os.path.dirname(__file__), '..', 'shaders')
-            self.mesh_shader = Shader(
-                os.path.join(shader_dir, 'mesh.vert'),
-                os.path.join(shader_dir, 'mesh.frag')
-            )
-        
-        self.vao = VertexArray()
-        self.vao.bind()
-        
-        # 合并顶点属性数据 (position + normal + color)
-        vertex_data = np.hstack([
-            self.vertices,
-            self.normals,
-            self.colors
-        ]).astype(np.float32)
-        
-        self.vbo = VertexBuffer(vertex_data)
-        self.ebo = IndexBuffer(self.indices)
-        
-        # 添加顶点属性
-        stride = 9 * 4  # 9 floats * 4 bytes
-        self.vao.add_buffer(self.vbo, 0, 3, GL_FLOAT, GL_FALSE, stride, ctypes.c_void_p(0))  # position
-        self.vao.add_buffer(self.vbo, 1, 3, GL_FLOAT, GL_FALSE, stride, ctypes.c_void_p(3 * 4))  # normal
-        self.vao.add_buffer(self.vbo, 2, 3, GL_FLOAT, GL_FALSE, stride, ctypes.c_void_p(6 * 4))  # color
-        
-        # 边缓冲区（线框模式）
-        if self.edges is not None:
-            self.edge_ebo = IndexBuffer(self.edges)
-        
-        self.vao.unbind()
-    
-    def _create_point_buffers(self):
-        """创建 Point Cloud 缓冲区"""
-        # 确保着色器已创建
-        if self.point_shader is None:
-            shader_dir = os.path.join(os.path.dirname(__file__), '..', 'shaders')
-            self.point_shader = Shader(
-                os.path.join(shader_dir, 'point.vert'),
-                os.path.join(shader_dir, 'point.frag')
-            )
-        
-        self.vao = VertexArray()
-        self.vao.bind()
-        
-        # 合并顶点属性数据 (position + color)
-        vertex_data = np.hstack([
-            self.vertices,
-            self.colors
-        ]).astype(np.float32)
-        
-        self.vbo = VertexBuffer(vertex_data)
-        
-        # 添加顶点属性
-        stride = 6 * 4  # 6 floats * 4 bytes
-        self.vao.add_buffer(self.vbo, 0, 3, GL_FLOAT, GL_FALSE, stride, ctypes.c_void_p(0))  # position
-        self.vao.add_buffer(self.vbo, 1, 3, GL_FLOAT, GL_FALSE, stride, ctypes.c_void_p(3 * 4))  # color
-        
-        self.vao.unbind()
+        try:
+            edges = set()
+            # 确保indices是二维数组
+            if len(indices.shape) == 1:
+                # 如果是一维数组，重塑为(N, 3)
+                indices = indices.reshape(-1, 3)
+            
+            for tri in indices:
+                # 确保tri是一个数组
+                if not isinstance(tri, (list, np.ndarray)):
+                    continue
+                # 如果tri长度不足3，跳过
+                if len(tri) < 3:
+                    continue
+                    
+                edges.add(tuple(sorted([int(tri[0]), int(tri[1])])))
+                edges.add(tuple(sorted([int(tri[1]), int(tri[2])])))
+                edges.add(tuple(sorted([int(tri[2]), int(tri[0])])))
+            
+            self.edges = np.array(list(edges), dtype=np.uint32).flatten() if edges else None
+        except Exception as e:
+            print(f"准备边数据时出错: {e}")
+            self.edges = None
     
     def render(self):
         """渲染场景"""
@@ -228,94 +193,175 @@ class Renderer:
         # 清除缓冲区
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT)
         
-        if self.data_type is None or self.vao is None or self.mesh_shader is None or self.point_shader is None:
+        if self.data_type is None:
+            print(f"无法渲染: data_type={self.data_type}")
             return
-        
+
         # 设置相机矩阵
         view = self.camera.get_view_matrix()
         projection = self.camera.get_projection_matrix()
         model = self.camera.get_model_matrix() @ self.trackball.get_matrix()
         
-        print(f"渲染 {self.data_type}, VAO: {self.vao is not None}, 顶点数: {len(self.vertices) if self.vertices is not None else 0}")
+        # 设置OpenGL变换矩阵
+        glMatrixMode(GL_MODELVIEW)
+        glLoadIdentity()
+        # 应用视图和模型变换
+        modelview = view @ model
+        glMultMatrixf(modelview.T.flatten())
+        
+        glMatrixMode(GL_PROJECTION)
+        glLoadIdentity()
+        glMultMatrixf(projection.T.flatten())
+        
+        print(f"渲染 {self.data_type}, 顶点数: {len(self.vertices) if self.vertices is not None else 0}")
         
         if self.data_type == 'mesh':
-            self._render_mesh(view, projection, model)
+            self._render_mesh()
         elif self.data_type == 'point_cloud':
-            self._render_point_cloud(view, projection, model)
+            self._render_point_cloud()
     
-    def _render_mesh(self, view, projection, model):
-        """渲染 Mesh"""
+    def _render_mesh(self):
+        """渲染 Mesh（使用固定管线）"""
         try:
-            self.vao.bind()
-            self.ebo.bind()
-            
-            # 激活着色器
-            self.mesh_shader.use()
-            
-            # 设置变换矩阵
-            self.mesh_shader.set_mat4("model", model)
-            self.mesh_shader.set_mat4("view", view)
-            self.mesh_shader.set_mat4("projection", projection)
-            
-            # 设置光照参数
-            self.mesh_shader.set_vec3("lightPos", [2.0, 2.0, 2.0])
-            self.mesh_shader.set_vec3("viewPos", self.camera.position)
-            self.mesh_shader.set_vec3("lightColor", [1.0, 1.0, 1.0])
-            self.mesh_shader.set_bool("useVertexColor", self.color_mode == 'vertex')
+            print("开始渲染mesh...")
             
             if self.render_mode == 'surface':
                 # 渲染表面
+                print("渲染表面模式")
                 glPolygonMode(GL_FRONT_AND_BACK, GL_FILL)
-                glDrawElements(GL_TRIANGLES, self.ebo.count, GL_UNSIGNED_INT, None)
+                # 启用光照
+                glEnable(GL_LIGHTING)
+                self._draw_mesh_elements()
             elif self.render_mode == 'wireframe':
                 # 渲染线框
-                if self.edge_ebo:
-                    self.edge_ebo.bind()
-                    glPolygonMode(GL_FRONT_AND_BACK, GL_LINE)
-                    glLineWidth(1.0)
-                    glDrawElements(GL_LINES, self.edge_ebo.count, GL_UNSIGNED_INT, None)
-                    self.ebo.bind()  # 恢复原来的 EBO
+                print("渲染线框模式")
+                glPolygonMode(GL_FRONT_AND_BACK, GL_LINE)
+                glLineWidth(self.line_width)
+                # 禁用光照，使用顶点颜色
+                glDisable(GL_LIGHTING)
+                self._draw_wireframe_elements()
             elif self.render_mode == 'surface+wireframe':
                 # 先渲染表面
+                print("渲染表面+线框模式")
                 glPolygonMode(GL_FRONT_AND_BACK, GL_FILL)
-                glDrawElements(GL_TRIANGLES, self.ebo.count, GL_UNSIGNED_INT, None)
+                # 启用光照
+                glEnable(GL_LIGHTING)
+                self._draw_mesh_elements()
                 
                 # 再渲染线框
-                if self.edge_ebo:
-                    self.edge_ebo.bind()
-                    glPolygonMode(GL_FRONT_AND_BACK, GL_LINE)
-                    glLineWidth(1.0)
-                    glDrawElements(GL_LINES, self.edge_ebo.count, GL_UNSIGNED_INT, None)
-                    self.ebo.bind()  # 恢复原来的 EBO
+                # 保存当前状态
+                glPushAttrib(GL_ALL_ATTRIB_BITS)
+                
+                # 禁用光照，使用纯色
+                glDisable(GL_LIGHTING)
+                glColor3f(0.0, 0.0, 0.0)  # 黑色线框
+                
+                glPolygonMode(GL_FRONT_AND_BACK, GL_LINE)
+                glLineWidth(self.line_width)
+                self._draw_wireframe_elements()
+                
+                # 恢复状态
+                glPopAttrib()
             
-            self.vao.unbind()
+            print("mesh渲染完成")
         except Exception as e:
             print(f"渲染 Mesh 时出错: {e}")
             import traceback
             traceback.print_exc()
     
-    def _render_point_cloud(self, view, projection, model):
-        """渲染 Point Cloud"""
+    def _draw_mesh_elements(self):
+        """绘制Mesh元素（使用立即模式）"""
+        glBegin(GL_TRIANGLES)
+        for i in range(0, len(self.indices), 3):
+            # 获取三个顶点索引
+            i0, i1, i2 = self.indices[i], self.indices[i+1], self.indices[i+2]
+            
+            # 绘制第一个顶点
+            if self.normals is not None:
+                glNormal3fv(self.normals[i0])
+            if self.colors is not None and self.color_mode == 'vertex':
+                glColor3fv(self.colors[i0])
+            glVertex3fv(self.vertices[i0])
+            
+            # 绘制第二个顶点
+            if self.normals is not None:
+                glNormal3fv(self.normals[i1])
+            if self.colors is not None and self.color_mode == 'vertex':
+                glColor3fv(self.colors[i1])
+            glVertex3fv(self.vertices[i1])
+            
+            # 绘制第三个顶点
+            if self.normals is not None:
+                glNormal3fv(self.normals[i2])
+            if self.colors is not None and self.color_mode == 'vertex':
+                glColor3fv(self.colors[i2])
+            glVertex3fv(self.vertices[i2])
+        glEnd()
+    
+    def _draw_wireframe_elements(self):
+        """绘制线框元素（使用立即模式）"""
+        if self.edges is not None:
+            # 使用边数据绘制线框
+            glBegin(GL_LINES)
+            for i in range(0, len(self.edges), 2):
+                i0, i1 = self.edges[i], self.edges[i+1]
+                
+                # 绘制第一个顶点
+                if self.colors is not None and self.color_mode == 'vertex':
+                    glColor3fv(self.colors[i0])
+                glVertex3fv(self.vertices[i0])
+                
+                # 绘制第二个顶点
+                if self.colors is not None and self.color_mode == 'vertex':
+                    glColor3fv(self.colors[i1])
+                glVertex3fv(self.vertices[i1])
+            glEnd()
+        else:
+            # 如果没有边数据，则使用三角面的边绘制线框
+            glBegin(GL_LINES)
+            for i in range(0, len(self.indices), 3):
+                # 获取三个顶点索引
+                i0, i1, i2 = self.indices[i], self.indices[i+1], self.indices[i+2]
+                
+                # 绘制三条边
+                # 边1: i0 - i1
+                if self.colors is not None and self.color_mode == 'vertex':
+                    glColor3fv(self.colors[i0])
+                glVertex3fv(self.vertices[i0])
+                if self.colors is not None and self.color_mode == 'vertex':
+                    glColor3fv(self.colors[i1])
+                glVertex3fv(self.vertices[i1])
+                
+                # 边2: i1 - i2
+                if self.colors is not None and self.color_mode == 'vertex':
+                    glColor3fv(self.colors[i1])
+                glVertex3fv(self.vertices[i1])
+                if self.colors is not None and self.color_mode == 'vertex':
+                    glColor3fv(self.colors[i2])
+                glVertex3fv(self.vertices[i2])
+                
+                # 边3: i2 - i0
+                if self.colors is not None and self.color_mode == 'vertex':
+                    glColor3fv(self.colors[i2])
+                glVertex3fv(self.vertices[i2])
+                if self.colors is not None and self.color_mode == 'vertex':
+                    glColor3fv(self.colors[i0])
+                glVertex3fv(self.vertices[i0])
+            glEnd()
+    
+    def _render_point_cloud(self):
+        """渲染 Point Cloud（使用固定管线）"""
         try:
-            self.vao.bind()
-            
-            # 激活着色器
-            self.point_shader.use()
-            
-            # 设置变换矩阵
-            self.point_shader.set_mat4("model", model)
-            self.point_shader.set_mat4("view", view)
-            self.point_shader.set_mat4("projection", projection)
-            
             # 设置点大小
-            self.point_shader.set_float("pointSize", self.point_size)
+            glPointSize(self.point_size)
             
             # 渲染点
-            glEnable(GL_PROGRAM_POINT_SIZE)
-            glDrawArrays(GL_POINTS, 0, len(self.vertices))
-            glDisable(GL_PROGRAM_POINT_SIZE)
-            
-            self.vao.unbind()
+            glBegin(GL_POINTS)
+            for i in range(len(self.vertices)):
+                if self.colors is not None:
+                    glColor3fv(self.colors[i])
+                glVertex3fv(self.vertices[i])
+            glEnd()
         except Exception as e:
             print(f"渲染 Point Cloud 时出错: {e}")
             import traceback
@@ -353,10 +399,17 @@ class Renderer:
             size = np.max(max_pos - min_pos)
             
             # 设置相机位置，使其能够看到整个模型
-            distance = size * 1.5  # 给一些边距
+            # 计算合适的距离，考虑视角角度以确保模型完整显示
+            fov_rad = np.radians(self.camera.fov)
+            distance = (size / 2) / np.tan(fov_rad / 2)
+            distance *= 1.5  # 给一些边距
+            
+            # 将相机放置在模型中心的前方，正对模型中心
             self.camera.position = np.array([center[0], center[1], center[2] + distance], dtype=np.float32)
             self.camera.target = center.astype(np.float32)
             self.camera.scale = 1.0
+            
+            print(f"重置视角: 相机位置={self.camera.position}, 目标={self.camera.target}, 模型中心={center}, 模型大小={size}")
     
     def set_render_mode(self, mode):
         """设置渲染模式"""
@@ -371,24 +424,3 @@ class Renderer:
     def set_point_size(self, size):
         """设置点大小"""
         self.point_size = max(0.5, min(10.0, size))
-    
-    def _cleanup_resources(self):
-        """清理资源"""
-        if self.vao:
-            self.vao.delete()
-            self.vao = None
-        if self.vbo:
-            self.vbo.delete()
-            self.vbo = None
-        if self.ebo:
-            self.ebo.delete()
-            self.ebo = None
-        if self.edge_ebo:
-            self.edge_ebo.delete()
-            self.edge_ebo = None
-        
-        self.vertices = None
-        self.indices = None
-        self.normals = None
-        self.colors = None
-        self.edges = None

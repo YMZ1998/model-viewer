@@ -5,6 +5,7 @@ Point Cloud 文件加载器
 import numpy as np
 import struct
 import os
+import plyfile
 
 
 class PointCloudLoader:
@@ -35,7 +36,51 @@ class PointCloudLoader:
     
     @staticmethod
     def _load_ply(file_path):
-        """加载 PLY 点云文件"""
+        """使用plyfile库加载PLY点云文件"""
+        try:
+            # 使用plyfile库读取PLY文件
+            plydata = plyfile.PlyData.read(file_path)
+            
+            # 获取顶点数据
+            vertex_data = plydata['vertex']
+            num_points = vertex_data.count
+            
+            # 提取点坐标
+            x = vertex_data.data['x'] if 'x' in vertex_data.data.dtype.names else np.zeros(num_points)
+            y = vertex_data.data['y'] if 'y' in vertex_data.data.dtype.names else np.zeros(num_points)
+            z = vertex_data.data['z'] if 'z' in vertex_data.data.dtype.names else np.zeros(num_points)
+            points = np.column_stack((x, y, z)).astype(np.float32)
+            
+            # 提取颜色数据（如果存在）
+            colors = None
+            if 'red' in vertex_data.data.dtype.names and 'green' in vertex_data.data.dtype.names and 'blue' in vertex_data.data.dtype.names:
+                r = vertex_data.data['red']
+                g = vertex_data.data['green']
+                b = vertex_data.data['blue']
+                # 检查颜色值范围，如果是0-255则需要归一化
+                if r.max() > 1.0 or g.max() > 1.0 or b.max() > 1.0:
+                    colors = np.column_stack((r/255.0, g/255.0, b/255.0)).astype(np.float32)
+                else:
+                    colors = np.column_stack((r, g, b)).astype(np.float32)
+            
+            # 如果没有颜色，使用高度映射
+            if colors is None:
+                colors = PointCloudLoader._height_based_colors(points)
+            
+            print(f"PLY点云文件加载完成: 点数={len(points)}, 有颜色={colors is not None}")
+            
+            return {
+                'points': points,
+                'colors': colors
+            }
+        except Exception as e:
+            print(f"使用plyfile库加载PLY文件失败: {e}")
+            # 回退到原来的实现
+            return PointCloudLoader._load_ply_legacy(file_path)
+    
+    @staticmethod
+    def _load_ply_legacy(file_path):
+        """加载 PLY 点云文件（原始实现）"""
         points = []
         colors = []
         has_color = False
@@ -51,36 +96,55 @@ class PointCloudLoader:
             properties = []
             
             while True:
-                line = f.readline().decode('ascii').strip()
-                if line.startswith('format'):
-                    if 'binary' in line:
-                        format_binary = True
-                elif line.startswith('element vertex'):
-                    point_count = int(line.split()[-1])
-                elif line.startswith('property'):
-                    properties.append(line.split()[-1])
-                    if 'red' in line or 'r' == line.split()[-1]:
-                        has_color = True
-                elif line == 'end_header':
+                try:
+                    line = f.readline().decode('ascii').strip()
+                    if line.startswith('format'):
+                        if 'binary' in line:
+                            format_binary = True
+                    elif line.startswith('element vertex'):
+                        point_count = int(line.split()[-1])
+                    elif line.startswith('property'):
+                        properties.append(line.split()[-1])
+                        if 'red' in line or 'r' == line.split()[-1]:
+                            has_color = True
+                    elif line == 'end_header':
+                        break
+                except Exception as e:
+                    print(f"读取PLY头部时出错: {e}")
                     break
+            
+            print(f"PLY点云文件信息: 点数={point_count}, 格式={'binary' if format_binary else 'ascii'}, 有颜色={has_color}")
             
             # 读取点数据
             for i in range(point_count):
-                if format_binary:
-                    # 读取 x, y, z
-                    p = struct.unpack('fff', f.read(12))
-                    points.append(p)
-                    
-                    if has_color:
-                        # 读取 r, g, b
-                        c = struct.unpack('BBB', f.read(3))
-                        colors.append([c[0]/255.0, c[1]/255.0, c[2]/255.0])
-                else:
-                    line = f.readline().decode('ascii').strip().split()
-                    points.append([float(line[0]), float(line[1]), float(line[2])])
-                    
-                    if has_color and len(line) >= 6:
-                        colors.append([float(line[3])/255.0, float(line[4])/255.0, float(line[5])/255.0])
+                try:
+                    if format_binary:
+                        # 读取 x, y, z
+                        p = struct.unpack('fff', f.read(12))
+                        points.append(p)
+                        
+                        if has_color:
+                            # 读取 r, g, b
+                            try:
+                                c = struct.unpack('BBB', f.read(3))
+                                colors.append([c[0]/255.0, c[1]/255.0, c[2]/255.0])
+                            except:
+                                # 如果读取颜色失败，使用默认颜色
+                                colors.append([0.7, 0.7, 0.7])
+                    else:
+                        line = f.readline().decode('ascii').strip().split()
+                        if len(line) >= 3:
+                            points.append([float(line[0]), float(line[1]), float(line[2])])
+                            
+                            if has_color and len(line) >= 6:
+                                colors.append([float(line[3])/255.0, float(line[4])/255.0, float(line[5])/255.0])
+                except Exception as e:
+                    print(f"读取点{i}时出错: {e}")
+                    # 跳过这个点
+                    continue
+        
+        if not points:
+            raise ValueError("PLY文件中没有找到点数据")
         
         points = np.array(points, dtype=np.float32)
         colors = np.array(colors, dtype=np.float32) if colors else None
@@ -89,6 +153,7 @@ class PointCloudLoader:
         if colors is None:
             colors = PointCloudLoader._height_based_colors(points)
         
+        print(f"PLY点云加载完成: 点数={len(points)}, 有颜色={colors is not None}")
         return {
             'points': points,
             'colors': colors

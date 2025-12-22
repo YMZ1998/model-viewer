@@ -17,7 +17,9 @@ class Shader:
             vertex_path: 顶点着色器文件路径
             fragment_path: 片段着色器文件路径
         """
+        print(f"编译着色器程序: {vertex_path}, {fragment_path}")
         self.program_id = self._compile_shader_program(vertex_path, fragment_path)
+        print(f"着色器程序编译成功: {self.program_id}")
     
     def _compile_shader_program(self, vertex_path, fragment_path):
         """编译着色器程序"""
