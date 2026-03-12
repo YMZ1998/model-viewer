@@ -5,7 +5,10 @@ Point Cloud 文件加载器
 import numpy as np
 import struct
 import os
-import plyfile
+try:
+    import plyfile
+except ImportError:  # 可选依赖
+    plyfile = None
 
 
 class PointCloudLoader:
@@ -37,6 +40,9 @@ class PointCloudLoader:
     @staticmethod
     def _load_ply(file_path):
         """使用plyfile库加载PLY点云文件"""
+        if plyfile is None:
+            return PointCloudLoader._load_ply_legacy(file_path)
+
         try:
             # 使用plyfile库读取PLY文件
             plydata = plyfile.PlyData.read(file_path)
