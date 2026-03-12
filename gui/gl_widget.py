@@ -6,9 +6,6 @@ from PyQt5.QtWidgets import QOpenGLWidget
 from PyQt5.QtCore import Qt, QPoint
 from OpenGL.GL import *
 
-from gl.renderer import Renderer
-
-
 class GLWidget(QOpenGLWidget):
     """OpenGL 渲染窗口部件"""
     
@@ -39,14 +36,20 @@ class GLWidget(QOpenGLWidget):
         from gl.renderer import Renderer
         self.renderer = Renderer()
         self.renderer.initialize()
+
+    def _ensure_renderer_ready(self):
+        """确保渲染器已经初始化。"""
+        return self.renderer is not None and self.renderer.initialized
     
     def resizeGL(self, width, height):
         """窗口大小改变"""
-        self.renderer.resize(width, height)
+        if self._ensure_renderer_ready():
+            self.renderer.resize(width, height)
     
     def paintGL(self):
         """绘制场景"""
-        self.renderer.render()
+        if self._ensure_renderer_ready():
+            self.renderer.render()
     
     def mousePressEvent(self, event):
         """鼠标按下事件"""
@@ -71,6 +74,8 @@ class GLWidget(QOpenGLWidget):
         
         if self.current_button == Qt.LeftButton:
             # 左键：旋转
+            if not self._ensure_renderer_ready():
+                return
             self.renderer.rotate_view(
                 self.last_pos.x(), self.last_pos.y(),
                 event.x(), event.y(),
@@ -80,6 +85,8 @@ class GLWidget(QOpenGLWidget):
         
         elif self.current_button == Qt.RightButton:
             # 右键：平移
+            if not self._ensure_renderer_ready():
+                return
             sensitivity = 0.01 / self.renderer.camera.scale
             self.renderer.pan_view(dx * sensitivity, -dy * sensitivity)
             self.update()
@@ -89,6 +96,8 @@ class GLWidget(QOpenGLWidget):
     def wheelEvent(self, event):
         """鼠标滚轮事件"""
         # 缩放
+        if not self._ensure_renderer_ready():
+            return
         delta = event.angleDelta().y()
         zoom_factor = 1.1 if delta > 0 else 0.9
         self.renderer.zoom_view(zoom_factor)
@@ -96,6 +105,9 @@ class GLWidget(QOpenGLWidget):
     
     def keyPressEvent(self, event):
         """键盘按下事件"""
+        if not self._ensure_renderer_ready():
+            return super().keyPressEvent(event)
+
         if event.key() == Qt.Key_R:
             # 重置视角
             self.renderer.reset_view()
@@ -118,30 +130,42 @@ class GLWidget(QOpenGLWidget):
     
     def load_mesh_data(self, vertices, indices, normals=None, colors=None):
         """加载 Mesh 数据"""
+        if not self._ensure_renderer_ready():
+            return
         self.renderer.load_mesh_data(vertices, indices, normals, colors)
         self.update()
     
     def load_point_cloud_data(self, points, colors=None):
         """加载 Point Cloud 数据"""
+        if not self._ensure_renderer_ready():
+            return
         self.renderer.load_point_cloud_data(points, colors)
         self.update()
     
     def set_render_mode(self, mode):
         """设置渲染模式"""
+        if not self._ensure_renderer_ready():
+            return
         self.renderer.set_render_mode(mode)
         self.update()
     
     def set_color_mode(self, mode):
         """设置颜色模式"""
+        if not self._ensure_renderer_ready():
+            return
         self.renderer.set_color_mode(mode)
         self.update()
     
     def set_point_size(self, size):
         """设置点大小"""
+        if not self._ensure_renderer_ready():
+            return
         self.renderer.set_point_size(size)
         self.update()
     
     def set_line_width(self, width):
         """设置线框模式线条宽度"""
+        if not self._ensure_renderer_ready():
+            return
         self.renderer.line_width = width
         self.update()

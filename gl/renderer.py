@@ -101,11 +101,9 @@ class Renderer:
             else:
                 # 生成美观的随机颜色
                 print("未提供颜色数据，生成随机颜色")
-                # 使用固定的随机种子以确保每次运行结果一致
-                np.random.seed(42)
-                self.colors = np.random.rand(len(vertices), 3).astype(np.float32)
-                # 重置随机种子
-                np.random.seed(None)
+                # 使用局部随机数生成器，避免污染全局随机状态
+                rng = np.random.default_rng(42)
+                self.colors = rng.random((len(vertices), 3), dtype=np.float32)
             
             # 准备边数据（用于线框模式）
             if len(indices) > 0:
@@ -142,11 +140,9 @@ class Renderer:
         else:
             # 生成美观的随机颜色
             print("未提供点云颜色数据，生成随机颜色")
-            # 使用固定的随机种子以确保每次运行结果一致
-            np.random.seed(42)
-            self.colors = np.random.rand(len(points), 3).astype(np.float32)
-            # 重置随机种子
-            np.random.seed(None)
+            # 使用局部随机数生成器，避免污染全局随机状态
+            rng = np.random.default_rng(42)
+            self.colors = rng.random((len(points), 3), dtype=np.float32)
     
     def _compute_normals(self, vertices, indices):
         """计算顶点法向量"""
