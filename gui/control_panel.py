@@ -101,8 +101,7 @@ class ControlPanel(QWidget):
         self.point_size_slider.setMinimum(5)
         self.point_size_slider.setMaximum(100)
         self.point_size_slider.setValue(20)  # 2.0 * 10
-        # 注意：这里应该连接信号，但在当前代码中被注释掉了
-        # self.point_size_slider.valueChanged.connect(self._on_point_size_changed)
+        self.point_size_slider.valueChanged.connect(self._on_point_size_changed)
         pc_layout.addWidget(point_size_label)
         pc_layout.addWidget(self.point_size_slider)
         
@@ -215,9 +214,10 @@ class ControlPanel(QWidget):
             data['normals'],
             data['colors']
         )
-        
+
         # 重置视角以适应模型
-        self.gl_widget.renderer.reset_view()
+        if self.gl_widget.renderer is not None:
+            self.gl_widget.renderer.reset_view()
         print("视角重置完成")
         
         self.current_file_path = file_path
@@ -235,9 +235,10 @@ class ControlPanel(QWidget):
             data['points'],
             data['colors']
         )
-        
+
         # 重置视角以适应模型
-        self.gl_widget.renderer.reset_view()
+        if self.gl_widget.renderer is not None:
+            self.gl_widget.renderer.reset_view()
         
         self.current_file_path = file_path
         self.data_type = 'point_cloud'

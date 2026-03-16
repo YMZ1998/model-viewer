@@ -2,10 +2,7 @@
 主窗口
 包含 OpenGL 渲染窗口和控制面板
 """
-from PyQt5.QtWidgets import QMainWindow, QWidget, QHBoxLayout, QMenuBar, QAction, QStatusBar
-from PyQt5.QtCore import Qt
-import sys
-import os
+from PyQt5.QtWidgets import QMainWindow, QWidget, QHBoxLayout, QAction, QStatusBar
 
 from gui.gl_widget import GLWidget
 from gui.control_panel import ControlPanel

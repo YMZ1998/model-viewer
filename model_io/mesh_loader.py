@@ -5,7 +5,10 @@ Mesh 文件加载器
 import numpy as np
 import struct
 import os
-import plyfile
+try:
+    import plyfile
+except ImportError:  # 可选依赖
+    plyfile = None
 
 
 class MeshLoader:
@@ -41,6 +44,9 @@ class MeshLoader:
     @staticmethod
     def _load_ply_mesh(file_path):
         """使用plyfile库加载PLY Mesh文件"""
+        if plyfile is None:
+            return MeshLoader._load_ply_mesh_legacy(file_path)
+
         try:
             # 使用plyfile库读取PLY文件
             plydata = plyfile.PlyData.read(file_path)
