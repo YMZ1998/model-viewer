@@ -87,8 +87,8 @@ class GLWidget(QOpenGLWidget):
             # 右键：平移
             if not self._ensure_renderer_ready():
                 return
-            sensitivity = 0.01 / self.renderer.camera.scale
-            self.renderer.pan_view(dx * sensitivity, -dy * sensitivity)
+            sensitivity = self.renderer.camera.get_pan_sensitivity(height)
+            self.renderer.pan_view(-dx * sensitivity, dy * sensitivity)
             self.update()
         
         self.last_pos = event.pos()

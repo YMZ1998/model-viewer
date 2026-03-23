@@ -110,8 +110,9 @@ class PointCloudLoader:
                     elif line.startswith('element vertex'):
                         point_count = int(line.split()[-1])
                     elif line.startswith('property'):
-                        properties.append(line.split()[-1])
-                        if 'red' in line or 'r' == line.split()[-1]:
+                        prop_name = line.split()[-1].lower()
+                        properties.append(prop_name)
+                        if prop_name in {'red', 'green', 'blue', 'r', 'g', 'b'}:
                             has_color = True
                     elif line == 'end_header':
                         break

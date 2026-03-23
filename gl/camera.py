@@ -55,6 +55,13 @@ class Camera:
         self.scale *= factor
         self.scale = max(0.01, min(100.0, self.scale))
     
+    def get_pan_sensitivity(self, viewport_height):
+        """Return world-space pan distance per screen pixel."""
+        viewport_height = max(1, viewport_height)
+        distance = np.linalg.norm(self.target - self.position)
+        world_height = 2.0 * distance * np.tan(np.radians(self.fov) / 2.0)
+        return world_height / (viewport_height * max(self.scale, 1e-6))
+
     def pan(self, dx, dy):
         """平移"""
         # 计算相机坐标系的右向量和上向量

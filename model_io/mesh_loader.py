@@ -139,8 +139,10 @@ class MeshLoader:
                     vertex_count = int(line.split()[-1])
                 elif line.startswith('element face'):
                     face_count = int(line.split()[-1])
-                elif line.startswith('property') and ('red' in line or 'r' in line):
-                    has_color = True
+                elif line.startswith('property'):
+                    prop_name = line.split()[-1].lower()
+                    if prop_name in {'red', 'green', 'blue', 'r', 'g', 'b'}:
+                        has_color = True
                 elif line == 'end_header':
                     break
             
