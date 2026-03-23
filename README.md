@@ -24,6 +24,7 @@ A desktop viewer for **3D meshes** and **point clouds**, built with **PyQt5 + Op
 - Desktop conveniences
   - Drag-and-drop file loading
   - Recent files
+  - Multiple UI themes
   - Screenshot export to PNG
 - Inspection workbench
   - Inspection mode toggle
