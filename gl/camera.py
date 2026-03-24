@@ -3,7 +3,7 @@ Camera utilities for the viewer.
 """
 import numpy as np
 
-from math_utils.transform import perspective, look_at
+from math_utils.transform import look_at, orthographic, perspective
 
 
 class Camera:
@@ -17,6 +17,8 @@ class Camera:
         self.fov = 45.0
         self.near = 0.1
         self.far = 100.0
+        self.projection_mode = 'perspective'
+        self.ortho_scale = 1.0
 
         self.width = width
         self.height = height
@@ -29,6 +31,17 @@ class Camera:
     def get_projection_matrix(self):
         """Return the camera projection matrix."""
         aspect = self.width / self.height if self.height > 0 else 1.0
+        if self.projection_mode == 'orthographic':
+            vertical_scale = max(self.ortho_scale, 1e-3)
+            horizontal_scale = vertical_scale * aspect
+            return orthographic(
+                -horizontal_scale,
+                horizontal_scale,
+                -vertical_scale,
+                vertical_scale,
+                self.near,
+                self.far,
+            )
         return perspective(self.fov, aspect, self.near, self.far)
 
     def get_model_matrix(self):
@@ -43,6 +56,10 @@ class Camera:
     def zoom(self, factor):
         """Zoom by dollying the camera toward or away from the target."""
         factor = max(factor, 1e-6)
+        if self.projection_mode == 'orthographic':
+            self.ortho_scale = np.clip(self.ortho_scale / factor, 1e-3, 1e6)
+            self.scale = 1.0
+            return
 
         offset = self.position - self.target
         distance = np.linalg.norm(offset)
@@ -59,9 +76,22 @@ class Camera:
     def get_pan_sensitivity(self, viewport_height):
         """Return world-space pan distance per screen pixel."""
         viewport_height = max(1, viewport_height)
-        distance = np.linalg.norm(self.target - self.position)
-        world_height = 2.0 * distance * np.tan(np.radians(self.fov) / 2.0)
+        if self.projection_mode == 'orthographic':
+            world_height = 2.0 * max(self.ortho_scale, 1e-3)
+        else:
+            distance = np.linalg.norm(self.target - self.position)
+            world_height = 2.0 * distance * np.tan(np.radians(self.fov) / 2.0)
         return world_height / viewport_height
+
+    def set_projection_mode(self, mode):
+        """Switch camera projection mode."""
+        if mode in {'perspective', 'orthographic'}:
+            self.projection_mode = mode
+
+    def sync_ortho_scale_from_distance(self):
+        """Match orthographic scale to the current perspective framing."""
+        distance = np.linalg.norm(self.target - self.position)
+        self.ortho_scale = max(distance * np.tan(np.radians(self.fov) / 2.0), 1e-3)
 
     def pan(self, dx, dy):
         """Translate the camera parallel to the view plane."""
@@ -87,4 +117,5 @@ class Camera:
         self.position = np.array([0.0, 0.0, 3.0], dtype=np.float32)
         self.target = np.array([0.0, 0.0, 0.0], dtype=np.float32)
         self.up = np.array([0.0, 1.0, 0.0], dtype=np.float32)
+        self.ortho_scale = 1.0
         self.scale = 1.0

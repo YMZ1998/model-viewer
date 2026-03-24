@@ -11,6 +11,16 @@ A desktop viewer for **3D meshes** and **point clouds**, built with **PyQt5 + Op
   - Orbit, pan, zoom
   - Fit view
   - Standard views: `Front`, `Back`, `Left`, `Right`, `Top`, `Bottom`, `Isometric`
+  - Projection toggle: `Perspective` / `Orthographic`
+- Visual presets
+  - `Studio Dark`
+  - `Studio Light`
+  - `Blueprint`
+  - `Inspection Lab`
+- Section tools
+  - Interactive section plane
+  - Axis switch: `X` / `Y` / `Z`
+  - Offset slider with invert direction
 - Scene helpers
   - World axes
   - Ground grid
@@ -20,6 +30,9 @@ A desktop viewer for **3D meshes** and **point clouds**, built with **PyQt5 + Op
   - Face normals
 - Render controls
   - Mesh surface / wireframe / surface+wireframe
+  - Mesh opacity control
+  - Point-cloud opacity control
+  - Back-face culling toggle
   - Point size and wireframe line width controls
 - Desktop conveniences
   - Drag-and-drop file loading
@@ -108,7 +121,14 @@ Mouse:
 - View behavior
   - Fit view works after loading
   - `Front / Right / Top / Isometric` switch correctly
+  - `Perspective / Orthographic` toggle keeps navigation usable
+  - Section plane clips the model and updates preview immediately
   - Pan stays usable after zooming in closely
+- Render tuning
+  - Mesh opacity updates immediately and persists across restart
+  - Point-cloud opacity updates immediately and persists across restart
+  - Back-face culling toggles immediately on meshes
+  - Visual preset switches background and lighting immediately
 - Inspection mode
   - `Select` can pick points
   - `Select` can pick faces on a mesh
@@ -138,9 +158,11 @@ Mouse:
 model-viewer/
 ├── main.py
 ├── gui/
+│   ├── app_settings.py
 │   ├── main_window.py
 │   ├── gl_widget.py
-│   └── control_panel.py
+│   ├── control_panel.py
+│   └── theme.py
 ├── gl/
 │   ├── renderer.py
 │   └── camera.py

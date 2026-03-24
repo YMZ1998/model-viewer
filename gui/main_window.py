@@ -1,7 +1,6 @@
 import os
 from datetime import datetime
 
-from PyQt5.QtCore import QSettings
 from PyQt5.QtWidgets import (
     QAction,
     QActionGroup,
@@ -18,6 +17,7 @@ from PyQt5.QtWidgets import (
     QWidget,
 )
 
+from gui.app_settings import MAX_RECENT_FILES, ViewerSettings, create_qsettings
 from gui.control_panel import ControlPanel
 from gui.gl_widget import GLWidget
 from gui.theme import DEFAULT_THEME_NAME, apply_theme, get_theme_label, get_theme_names
@@ -25,7 +25,6 @@ from gui.theme import DEFAULT_THEME_NAME, apply_theme, get_theme_label, get_them
 
 class MainWindow(QMainWindow):
     SUPPORTED_EXTENSIONS = {'.obj', '.stl', '.ply', '.xyz'}
-    MAX_RECENT_FILES = 10
     STANDARD_VIEW_LABELS = {
         'front': 'Front',
         'back': 'Back',
@@ -46,20 +45,47 @@ class MainWindow(QMainWindow):
         'prefer_point': 'Prefer Point',
         'prefer_face': 'Prefer Face',
     }
+    PROJECTION_LABELS = {
+        'perspective': 'Perspective',
+        'orthographic': 'Orthographic',
+    }
+    VISUAL_PRESET_LABELS = {
+        'studio_dark': 'Studio Dark',
+        'studio_light': 'Studio Light',
+        'blueprint': 'Blueprint',
+        'inspection_lab': 'Inspection Lab',
+    }
+    SECTION_AXIS_LABELS = {
+        'x': 'X',
+        'y': 'Y',
+        'z': 'Z',
+    }
     THEME_LABELS = dict((name, get_theme_label(name)) for name in get_theme_names())
 
     def __init__(self):
         super().__init__()
-        self.settings = QSettings("OpenAI", "PyQtGLMeshViewer")
-        self.recent_files = self._load_recent_files()
-        self.show_axes = self.settings.value("view/show_axes", True, type=bool)
-        self.show_grid = self.settings.value("view/show_grid", False, type=bool)
-        self.show_bounding_box = self.settings.value("inspect/show_bounding_box", False, type=bool)
-        self.show_model_center = self.settings.value("inspect/show_model_center", False, type=bool)
-        self.show_vertex_normals = self.settings.value("inspect/show_vertex_normals", False, type=bool)
-        self.show_face_normals = self.settings.value("inspect/show_face_normals", False, type=bool)
-        self.pick_preference = self.settings.value("inspect/pick_preference", "balanced", type=str)
-        self.current_theme = self.settings.value("ui/theme", DEFAULT_THEME_NAME, type=str)
+        self.settings = create_qsettings()
+        self.viewer_settings = ViewerSettings.from_qsettings(self.settings)
+        self.recent_files = list(self.viewer_settings.recent_files)
+        self.show_axes = self.viewer_settings.show_axes
+        self.show_grid = self.viewer_settings.show_grid
+        self.projection_mode = self.viewer_settings.projection_mode
+        self.visual_preset = self.viewer_settings.visual_preset
+        self.section_plane_enabled = self.viewer_settings.section_plane_enabled
+        self.section_plane_axis = self.viewer_settings.section_plane_axis
+        self.section_plane_offset_ratio = self.viewer_settings.section_plane_offset_ratio
+        self.section_plane_inverted = self.viewer_settings.section_plane_inverted
+        self.mesh_opacity = self.viewer_settings.mesh_opacity
+        self.point_opacity = self.viewer_settings.point_opacity
+        self.backface_culling = self.viewer_settings.backface_culling
+        self.point_size = self.viewer_settings.point_size
+        self.line_width = self.viewer_settings.line_width
+        self.show_bounding_box = self.viewer_settings.show_bounding_box
+        self.show_model_center = self.viewer_settings.show_model_center
+        self.show_vertex_normals = self.viewer_settings.show_vertex_normals
+        self.show_face_normals = self.viewer_settings.show_face_normals
+        self.pick_preference = self.viewer_settings.pick_preference
+        self.current_theme = self.viewer_settings.theme_name or DEFAULT_THEME_NAME
         self.current_standard_view = 'isometric'
         self.current_file_path = None
 
@@ -78,10 +104,21 @@ class MainWindow(QMainWindow):
         self.set_theme(self.current_theme)
         self.set_show_axes(self.show_axes)
         self.set_show_grid(self.show_grid)
+        self.set_projection_mode(self.projection_mode)
+        self.set_visual_preset(self.visual_preset)
+        self.set_section_plane_axis(self.section_plane_axis, save=False)
+        self.set_section_plane_offset_ratio(self.section_plane_offset_ratio, save=False)
+        self.set_section_plane_inverted(self.section_plane_inverted, save=False)
+        self.set_section_plane_enabled(self.section_plane_enabled)
         self.set_show_bounding_box(self.show_bounding_box)
         self.set_show_model_center(self.show_model_center)
         self.set_show_vertex_normals(self.show_vertex_normals)
         self.set_show_face_normals(self.show_face_normals)
+        self.set_mesh_opacity(self.mesh_opacity)
+        self.set_point_opacity(self.point_opacity)
+        self.set_backface_culling(self.backface_culling)
+        self.set_point_size(self.point_size)
+        self.set_line_width(self.line_width)
         self.set_pick_preference(self.pick_preference)
         self.control_panel.set_standard_view(self.current_standard_view)
 
@@ -175,6 +212,36 @@ class MainWindow(QMainWindow):
         self.show_grid_action.toggled.connect(self.set_show_grid)
         view_menu.addAction(self.show_grid_action)
 
+        projection_menu = view_menu.addMenu("Projection")
+        self.projection_action_group = QActionGroup(self)
+        self.projection_action_group.setExclusive(True)
+        self.projection_actions = {}
+        for key, label in self.PROJECTION_LABELS.items():
+            action = QAction(label, self, checkable=True)
+            action.triggered.connect(lambda checked=False, value=key: self.set_projection_mode(value))
+            self.projection_action_group.addAction(action)
+            projection_menu.addAction(action)
+            self.projection_actions[key] = action
+
+        visual_preset_menu = view_menu.addMenu("Visual Preset")
+        self.visual_preset_action_group = QActionGroup(self)
+        self.visual_preset_action_group.setExclusive(True)
+        self.visual_preset_actions = {}
+        for key, label in self.VISUAL_PRESET_LABELS.items():
+            action = QAction(label, self, checkable=True)
+            action.triggered.connect(lambda checked=False, value=key: self.set_visual_preset(value))
+            self.visual_preset_action_group.addAction(action)
+            visual_preset_menu.addAction(action)
+            self.visual_preset_actions[key] = action
+
+        section_menu = view_menu.addMenu("Section Plane")
+        self.section_plane_action = QAction("Enable Section Plane", self, checkable=True)
+        self.section_plane_action.toggled.connect(self.set_section_plane_enabled)
+        section_menu.addAction(self.section_plane_action)
+        reset_section_action = QAction("Reset Section Plane", self)
+        reset_section_action.triggered.connect(self.reset_section_plane)
+        section_menu.addAction(reset_section_action)
+
         theme_menu = view_menu.addMenu("Theme")
         self.theme_action_group = QActionGroup(self)
         self.theme_action_group.setExclusive(True)
@@ -258,6 +325,13 @@ class MainWindow(QMainWindow):
         fit_action.triggered.connect(self.fit_view)
         self.toolbar.addAction(fit_action)
 
+        self.toolbar_projection_action = QAction("Ortho", self)
+        self.toolbar_projection_action.setCheckable(True)
+        self.toolbar_projection_action.toggled.connect(
+            lambda checked: self.set_projection_mode('orthographic' if checked else 'perspective')
+        )
+        self.toolbar.addAction(self.toolbar_projection_action)
+
         screenshot_action = QAction("Screenshot", self)
         screenshot_action.triggered.connect(self.export_screenshot)
         self.toolbar.addAction(screenshot_action)
@@ -288,36 +362,49 @@ class MainWindow(QMainWindow):
         self.mode_status_label.setProperty("role", "statusPill")
         self.pick_status_label = QLabel("Pick: Balanced")
         self.pick_status_label.setProperty("role", "statusPill")
+        self.projection_status_label = QLabel("Projection: " + self.PROJECTION_LABELS.get(self.projection_mode, 'Perspective'))
+        self.projection_status_label.setProperty("role", "statusPill")
+        self.visual_status_label = QLabel("Visual: " + self.VISUAL_PRESET_LABELS.get(self.visual_preset, 'Studio Dark'))
+        self.visual_status_label.setProperty("role", "statusPill")
+        self.section_status_label = QLabel("Section: Off")
+        self.section_status_label.setProperty("role", "statusPill")
         self.theme_status_label = QLabel("Theme: " + self.THEME_LABELS.get(self.current_theme, self.THEME_LABELS[DEFAULT_THEME_NAME]))
         self.theme_status_label.setProperty("role", "statusPill")
 
         self.status_bar.addPermanentWidget(self.file_status_label)
         self.status_bar.addPermanentWidget(self.mode_status_label)
         self.status_bar.addPermanentWidget(self.pick_status_label)
+        self.status_bar.addPermanentWidget(self.projection_status_label)
+        self.status_bar.addPermanentWidget(self.visual_status_label)
+        self.status_bar.addPermanentWidget(self.section_status_label)
         self.status_bar.addPermanentWidget(self.theme_status_label)
         self.status_bar.showMessage("Ready")
 
     def show_status_message(self, message, timeout=3000):
         self.status_bar.showMessage(message, timeout)
 
-    def _load_recent_files(self):
-        recent_files = self.settings.value("recent_files", [])
-        if isinstance(recent_files, str):
-            recent_files = [recent_files] if recent_files else []
-        if recent_files is None:
-            recent_files = []
-        return [path for path in recent_files if isinstance(path, str) and path]
-
     def _save_settings(self):
-        self.settings.setValue("recent_files", self.recent_files)
-        self.settings.setValue("view/show_axes", self.show_axes)
-        self.settings.setValue("view/show_grid", self.show_grid)
-        self.settings.setValue("inspect/show_bounding_box", self.show_bounding_box)
-        self.settings.setValue("inspect/show_model_center", self.show_model_center)
-        self.settings.setValue("inspect/show_vertex_normals", self.show_vertex_normals)
-        self.settings.setValue("inspect/show_face_normals", self.show_face_normals)
-        self.settings.setValue("inspect/pick_preference", self.pick_preference)
-        self.settings.setValue("ui/theme", self.current_theme)
+        self.viewer_settings.recent_files = list(self.recent_files)
+        self.viewer_settings.show_axes = self.show_axes
+        self.viewer_settings.show_grid = self.show_grid
+        self.viewer_settings.projection_mode = self.projection_mode
+        self.viewer_settings.visual_preset = self.visual_preset
+        self.viewer_settings.section_plane_enabled = self.section_plane_enabled
+        self.viewer_settings.section_plane_axis = self.section_plane_axis
+        self.viewer_settings.section_plane_offset_ratio = self.section_plane_offset_ratio
+        self.viewer_settings.section_plane_inverted = self.section_plane_inverted
+        self.viewer_settings.mesh_opacity = self.mesh_opacity
+        self.viewer_settings.point_opacity = self.point_opacity
+        self.viewer_settings.backface_culling = self.backface_culling
+        self.viewer_settings.point_size = self.point_size
+        self.viewer_settings.line_width = self.line_width
+        self.viewer_settings.show_bounding_box = self.show_bounding_box
+        self.viewer_settings.show_model_center = self.show_model_center
+        self.viewer_settings.show_vertex_normals = self.show_vertex_normals
+        self.viewer_settings.show_face_normals = self.show_face_normals
+        self.viewer_settings.pick_preference = self.pick_preference
+        self.viewer_settings.theme_name = self.current_theme
+        self.viewer_settings.save(self.settings)
 
     def _update_recent_files_menu(self):
         self.recent_files_menu.clear()
@@ -333,17 +420,17 @@ class MainWindow(QMainWindow):
             self.recent_files_menu.addAction(action)
 
     def _add_recent_file(self, file_path):
-        normalized_path = os.path.normpath(file_path)
-        self.recent_files = [path for path in self.recent_files if os.path.normpath(path) != normalized_path]
-        self.recent_files.insert(0, file_path)
-        self.recent_files = self.recent_files[:self.MAX_RECENT_FILES]
+        self.viewer_settings.recent_files = list(self.recent_files)
+        self.viewer_settings.add_recent_file(file_path)
+        self.recent_files = list(self.viewer_settings.recent_files[:MAX_RECENT_FILES])
         self._save_settings()
         self._update_recent_files_menu()
 
     def _remove_recent_file(self, file_path):
-        normalized_path = os.path.normpath(file_path)
         original_length = len(self.recent_files)
-        self.recent_files = [path for path in self.recent_files if os.path.normpath(path) != normalized_path]
+        self.viewer_settings.recent_files = list(self.recent_files)
+        self.viewer_settings.remove_recent_file(file_path)
+        self.recent_files = list(self.viewer_settings.recent_files)
         if len(self.recent_files) != original_length:
             self._save_settings()
             self._update_recent_files_menu()
@@ -412,6 +499,86 @@ class MainWindow(QMainWindow):
         self.control_panel.set_scene_state(self.show_axes, self.show_grid, self.current_standard_view)
         self._save_settings()
 
+    def set_projection_mode(self, mode):
+        if mode not in self.PROJECTION_LABELS:
+            return
+        self.projection_mode = mode
+        self.gl_widget.set_projection_mode(mode)
+        projection_action = self.projection_actions.get(mode)
+        if projection_action is not None:
+            projection_action.blockSignals(True)
+            projection_action.setChecked(True)
+            projection_action.blockSignals(False)
+        self.toolbar_projection_action.blockSignals(True)
+        self.toolbar_projection_action.setChecked(mode == 'orthographic')
+        self.toolbar_projection_action.blockSignals(False)
+        self.projection_status_label.setText("Projection: " + self.PROJECTION_LABELS[mode])
+        self._save_settings()
+        self.show_status_message("Projection: " + self.PROJECTION_LABELS[mode], 2000)
+
+    def set_visual_preset(self, preset_name):
+        if preset_name not in self.VISUAL_PRESET_LABELS:
+            return
+        self.visual_preset = preset_name
+        self.gl_widget.set_visual_preset(preset_name)
+        preset_action = self.visual_preset_actions.get(preset_name)
+        if preset_action is not None:
+            preset_action.blockSignals(True)
+            preset_action.setChecked(True)
+            preset_action.blockSignals(False)
+        self.visual_status_label.setText("Visual: " + self.VISUAL_PRESET_LABELS[preset_name])
+        self._save_settings()
+        self.show_status_message("Visual preset: " + self.VISUAL_PRESET_LABELS[preset_name], 2000)
+
+    def _update_section_plane_status(self):
+        if not self.section_plane_enabled:
+            self.section_status_label.setText("Section: Off")
+            return
+        axis_label = self.SECTION_AXIS_LABELS.get(self.section_plane_axis, self.section_plane_axis.upper())
+        direction = "Inv" if self.section_plane_inverted else "Std"
+        self.section_status_label.setText(f"Section: {axis_label} {self.section_plane_offset_ratio:+.2f} {direction}")
+
+    def set_section_plane_enabled(self, enabled):
+        self.section_plane_enabled = bool(enabled)
+        self.gl_widget.set_section_plane_enabled(self.section_plane_enabled)
+        self._sync_checkable_action(self.section_plane_action, self.section_plane_enabled)
+        self._update_section_plane_status()
+        self._save_settings()
+
+    def set_section_plane_axis(self, axis, save=True):
+        if axis not in self.SECTION_AXIS_LABELS:
+            return
+        self.section_plane_axis = axis
+        self.gl_widget.set_section_plane_axis(axis)
+        self._update_section_plane_status()
+        if save:
+            self._save_settings()
+
+    def set_section_plane_offset_ratio(self, offset_ratio, save=True):
+        self.section_plane_offset_ratio = max(-1.0, min(1.0, float(offset_ratio)))
+        self.gl_widget.set_section_plane_offset_ratio(self.section_plane_offset_ratio)
+        self._update_section_plane_status()
+        if save:
+            self._save_settings()
+
+    def set_section_plane_inverted(self, inverted, save=True):
+        self.section_plane_inverted = bool(inverted)
+        self.gl_widget.set_section_plane_inverted(self.section_plane_inverted)
+        self._update_section_plane_status()
+        if save:
+            self._save_settings()
+
+    def reset_section_plane(self):
+        self.section_plane_enabled = False
+        self.section_plane_axis = 'z'
+        self.section_plane_offset_ratio = 0.0
+        self.section_plane_inverted = False
+        self.gl_widget.reset_section_plane()
+        self._sync_checkable_action(self.section_plane_action, False)
+        self._update_section_plane_status()
+        self._save_settings()
+        self.show_status_message("Section plane reset", 2000)
+
     def set_show_bounding_box(self, show):
         self.show_bounding_box = bool(show)
         self.gl_widget.set_show_bounding_box(show)
@@ -434,6 +601,31 @@ class MainWindow(QMainWindow):
         self.show_face_normals = bool(show)
         self.gl_widget.set_show_face_normals(show)
         self._sync_checkable_action(self.show_face_normals_action, self.show_face_normals)
+        self._save_settings()
+
+    def set_mesh_opacity(self, opacity):
+        self.mesh_opacity = float(opacity)
+        self.gl_widget.set_mesh_opacity(self.mesh_opacity)
+        self._save_settings()
+
+    def set_point_opacity(self, opacity):
+        self.point_opacity = float(opacity)
+        self.gl_widget.set_point_opacity(self.point_opacity)
+        self._save_settings()
+
+    def set_backface_culling(self, enabled):
+        self.backface_culling = bool(enabled)
+        self.gl_widget.set_backface_culling(self.backface_culling)
+        self._save_settings()
+
+    def set_point_size(self, size):
+        self.point_size = float(size)
+        self.gl_widget.set_point_size(self.point_size)
+        self._save_settings()
+
+    def set_line_width(self, width):
+        self.line_width = float(width)
+        self.gl_widget.set_line_width(self.line_width)
         self._save_settings()
 
     def set_theme(self, theme_name):
@@ -521,6 +713,7 @@ class MainWindow(QMainWindow):
         self._sync_checkable_action(self.show_model_center_action, snapshot.get('show_model_center', False))
         self._sync_checkable_action(self.show_vertex_normals_action, snapshot.get('show_vertex_normals', False))
         self._sync_checkable_action(self.show_face_normals_action, snapshot.get('show_face_normals', False))
+        self._sync_checkable_action(self.section_plane_action, snapshot.get('section_plane_enabled', False))
 
         self.mode_status_label.setText("Inspect" if snapshot.get('inspection_mode', False) else "Browse")
 
@@ -536,6 +729,29 @@ class MainWindow(QMainWindow):
             self.inspect_action_actions[action_mode].blockSignals(True)
             self.inspect_action_actions[action_mode].setChecked(True)
             self.inspect_action_actions[action_mode].blockSignals(False)
+
+        projection_mode = snapshot.get('projection_mode', self.projection_mode)
+        if projection_mode in self.projection_actions:
+            self.projection_actions[projection_mode].blockSignals(True)
+            self.projection_actions[projection_mode].setChecked(True)
+            self.projection_actions[projection_mode].blockSignals(False)
+            self.toolbar_projection_action.blockSignals(True)
+            self.toolbar_projection_action.setChecked(projection_mode == 'orthographic')
+            self.toolbar_projection_action.blockSignals(False)
+            self.projection_status_label.setText("Projection: " + self.PROJECTION_LABELS[projection_mode])
+
+        visual_preset = snapshot.get('visual_preset', self.visual_preset)
+        if visual_preset in self.visual_preset_actions:
+            self.visual_preset_actions[visual_preset].blockSignals(True)
+            self.visual_preset_actions[visual_preset].setChecked(True)
+            self.visual_preset_actions[visual_preset].blockSignals(False)
+            self.visual_status_label.setText("Visual: " + self.VISUAL_PRESET_LABELS[visual_preset])
+
+        self.section_plane_enabled = bool(snapshot.get('section_plane_enabled', self.section_plane_enabled))
+        self.section_plane_axis = snapshot.get('section_plane_axis', self.section_plane_axis)
+        self.section_plane_offset_ratio = float(snapshot.get('section_plane_offset_ratio', self.section_plane_offset_ratio))
+        self.section_plane_inverted = bool(snapshot.get('section_plane_inverted', self.section_plane_inverted))
+        self._update_section_plane_status()
 
         theme_action = self.theme_actions.get(self.current_theme)
         if theme_action is not None:
@@ -553,7 +769,12 @@ class MainWindow(QMainWindow):
             "Features:\n"
             "- Drag and drop, recent files, fit view, standard views\n"
             "- Multiple desktop themes\n"
+            "- Perspective/orthographic projection switch\n"
+            "- Background and lighting visual presets\n"
+            "- Interactive section plane with axis, offset, and invert controls\n"
             "- Axes, grid, screenshot export\n"
+            "- Mesh and point-cloud opacity controls\n"
+            "- Back-face culling, point size, line width tuning\n"
             "- Inspection mode with point/face picking\n"
             "- Distance, angle, face-area measurements\n"
             "- Bounding box, center, normals, grouped report export",

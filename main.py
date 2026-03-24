@@ -6,13 +6,13 @@ import os
 import sys
 import traceback
 
-from PyQt5.QtCore import QSettings
 from PyQt5.QtWidgets import QApplication, QMessageBox
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
+from gui.app_settings import ViewerSettings, create_qsettings
 from gui.main_window import MainWindow
-from gui.theme import DEFAULT_THEME_NAME, apply_theme
+from gui.theme import apply_theme
 
 
 def _show_error(message, details=None):
@@ -53,9 +53,9 @@ def main():
         app = QApplication(sys.argv)
         app.setApplicationName("PyQtGLMeshViewer")
         app.setOrganizationName("OpenAI")
-        settings = QSettings("OpenAI", "PyQtGLMeshViewer")
-        theme_name = settings.value("ui/theme", DEFAULT_THEME_NAME, type=str)
-        apply_theme(app, theme_name)
+        settings = create_qsettings()
+        viewer_settings = ViewerSettings.from_qsettings(settings)
+        apply_theme(app, viewer_settings.theme_name)
 
         window = MainWindow()
         window.show()

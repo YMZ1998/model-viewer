@@ -23,6 +23,17 @@ class GLWidget(QOpenGLWidget):
         self._pending_show_model_center = False
         self._pending_show_vertex_normals = False
         self._pending_show_face_normals = False
+        self._pending_projection_mode = 'perspective'
+        self._pending_visual_preset = 'studio_dark'
+        self._pending_section_plane_enabled = False
+        self._pending_section_plane_axis = 'z'
+        self._pending_section_plane_offset_ratio = 0.0
+        self._pending_section_plane_inverted = False
+        self._pending_mesh_opacity = 1.0
+        self._pending_point_opacity = 1.0
+        self._pending_backface_culling = False
+        self._pending_point_size = 2.0
+        self._pending_line_width = 2.0
         self._inspection_mode = False
         self._inspection_action_mode = 'select'
         self._inspection_pick_mode = 'auto'
@@ -42,6 +53,17 @@ class GLWidget(QOpenGLWidget):
         self.renderer.set_show_model_center(self._pending_show_model_center)
         self.renderer.set_show_vertex_normals(self._pending_show_vertex_normals)
         self.renderer.set_show_face_normals(self._pending_show_face_normals)
+        self.renderer.set_projection_mode(self._pending_projection_mode)
+        self.renderer.set_visual_preset(self._pending_visual_preset)
+        self.renderer.set_section_plane_enabled(self._pending_section_plane_enabled)
+        self.renderer.set_section_plane_axis(self._pending_section_plane_axis)
+        self.renderer.set_section_plane_offset_ratio(self._pending_section_plane_offset_ratio)
+        self.renderer.set_section_plane_inverted(self._pending_section_plane_inverted)
+        self.renderer.set_mesh_opacity(self._pending_mesh_opacity)
+        self.renderer.set_point_opacity(self._pending_point_opacity)
+        self.renderer.set_backface_culling(self._pending_backface_culling)
+        self.renderer.set_point_size(self._pending_point_size)
+        self.renderer.set_line_width(self._pending_line_width)
         self.renderer.set_inspection_mode(self._inspection_mode)
         self.renderer.set_pick_preference(self._inspection_pick_preference)
         self.renderer.fit_view()
@@ -228,6 +250,62 @@ class GLWidget(QOpenGLWidget):
         self.renderer.set_standard_view(view_name)
         self.update()
 
+    def set_projection_mode(self, mode):
+        if mode not in {'perspective', 'orthographic'}:
+            return
+        self._pending_projection_mode = mode
+        if self._ensure_renderer_ready():
+            self.renderer.set_projection_mode(mode)
+            self._emit_inspection_state()
+            self.update()
+
+    def set_visual_preset(self, preset_name):
+        self._pending_visual_preset = preset_name
+        if self._ensure_renderer_ready():
+            self.renderer.set_visual_preset(preset_name)
+            self._emit_inspection_state()
+            self.update()
+
+    def set_section_plane_enabled(self, enabled):
+        self._pending_section_plane_enabled = bool(enabled)
+        if self._ensure_renderer_ready():
+            self.renderer.set_section_plane_enabled(enabled)
+            self._emit_inspection_state()
+            self.update()
+
+    def set_section_plane_axis(self, axis):
+        if axis not in {'x', 'y', 'z'}:
+            return
+        self._pending_section_plane_axis = axis
+        if self._ensure_renderer_ready():
+            self.renderer.set_section_plane_axis(axis)
+            self._emit_inspection_state()
+            self.update()
+
+    def set_section_plane_offset_ratio(self, ratio):
+        self._pending_section_plane_offset_ratio = float(ratio)
+        if self._ensure_renderer_ready():
+            self.renderer.set_section_plane_offset_ratio(ratio)
+            self._emit_inspection_state()
+            self.update()
+
+    def set_section_plane_inverted(self, inverted):
+        self._pending_section_plane_inverted = bool(inverted)
+        if self._ensure_renderer_ready():
+            self.renderer.set_section_plane_inverted(inverted)
+            self._emit_inspection_state()
+            self.update()
+
+    def reset_section_plane(self):
+        self._pending_section_plane_enabled = False
+        self._pending_section_plane_axis = 'z'
+        self._pending_section_plane_offset_ratio = 0.0
+        self._pending_section_plane_inverted = False
+        if self._ensure_renderer_ready():
+            self.renderer.reset_section_plane()
+            self._emit_inspection_state()
+            self.update()
+
     def set_show_axes(self, show):
         self._pending_show_axes = bool(show)
         if self._ensure_renderer_ready():
@@ -386,12 +464,37 @@ class GLWidget(QOpenGLWidget):
             self.renderer.set_color_mode(mode)
             self.update()
 
+    def set_mesh_opacity(self, opacity):
+        self._pending_mesh_opacity = float(opacity)
+        if self._ensure_renderer_ready():
+            self.renderer.set_mesh_opacity(opacity)
+            self._emit_inspection_state()
+            self.update()
+
+    def set_point_opacity(self, opacity):
+        self._pending_point_opacity = float(opacity)
+        if self._ensure_renderer_ready():
+            self.renderer.set_point_opacity(opacity)
+            self._emit_inspection_state()
+            self.update()
+
+    def set_backface_culling(self, enabled):
+        self._pending_backface_culling = bool(enabled)
+        if self._ensure_renderer_ready():
+            self.renderer.set_backface_culling(enabled)
+            self._emit_inspection_state()
+            self.update()
+
     def set_point_size(self, size):
+        self._pending_point_size = float(size)
         if self._ensure_renderer_ready():
             self.renderer.set_point_size(size)
+            self._emit_inspection_state()
             self.update()
 
     def set_line_width(self, width):
+        self._pending_line_width = float(width)
         if self._ensure_renderer_ready():
-            self.renderer.line_width = width
+            self.renderer.set_line_width(width)
+            self._emit_inspection_state()
             self.update()

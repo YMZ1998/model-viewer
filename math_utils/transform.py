@@ -30,6 +30,32 @@ def perspective(fovy, aspect, near, far):
     return mat
 
 
+def orthographic(left, right, bottom, top, near, far):
+    """
+    创建正交投影矩阵
+
+    Args:
+        left, right: 左右边界
+        bottom, top: 上下边界
+        near, far: 近平面和远平面
+
+    Returns:
+        4x4 投影矩阵
+    """
+    width = right - left
+    height = top - bottom
+    depth = far - near
+
+    mat = np.identity(4, dtype=np.float32)
+    mat[0, 0] = 2.0 / width if abs(width) > 1e-8 else 1.0
+    mat[1, 1] = 2.0 / height if abs(height) > 1e-8 else 1.0
+    mat[2, 2] = -2.0 / depth if abs(depth) > 1e-8 else -1.0
+    mat[0, 3] = -(right + left) / width if abs(width) > 1e-8 else 0.0
+    mat[1, 3] = -(top + bottom) / height if abs(height) > 1e-8 else 0.0
+    mat[2, 3] = -(far + near) / depth if abs(depth) > 1e-8 else 0.0
+    return mat
+
+
 def look_at(eye, center, up):
     """
     创建视图矩阵（LookAt）

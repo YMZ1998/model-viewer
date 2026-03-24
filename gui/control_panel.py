@@ -28,6 +28,14 @@ class ControlPanel(QWidget):
         ("Isometric", "isometric"), ("Front", "front"), ("Back", "back"),
         ("Left", "left"), ("Right", "right"), ("Top", "top"), ("Bottom", "bottom"),
     ]
+    PROJECTION_MODES = [("Perspective", "perspective"), ("Orthographic", "orthographic")]
+    VISUAL_PRESETS = [
+        ("Studio Dark", "studio_dark"),
+        ("Studio Light", "studio_light"),
+        ("Blueprint", "blueprint"),
+        ("Inspection Lab", "inspection_lab"),
+    ]
+    SECTION_AXES = [("X Axis", "x"), ("Y Axis", "y"), ("Z Axis", "z")]
     PICK_MODES = [("Auto", "auto"), ("Point", "point"), ("Face", "face")]
     PICK_PREFERENCES = [("Balanced", "balanced"), ("Prefer Point", "prefer_point"), ("Prefer Face", "prefer_face")]
     ACTION_MODES = [("Select", "select"), ("Distance", "distance"), ("Angle", "angle"), ("Face Area", "face_area")]
@@ -83,6 +91,18 @@ class ControlPanel(QWidget):
         for label, view_name in self.STANDARD_VIEWS:
             self.standard_view_combo.addItem(label, view_name)
         scene_layout.addWidget(self.standard_view_combo)
+        scene_layout.addWidget(QLabel("Projection:"))
+        self.projection_combo = QComboBox()
+        for label, mode in self.PROJECTION_MODES:
+            self.projection_combo.addItem(label, mode)
+        self.projection_combo.currentIndexChanged.connect(self._on_projection_changed)
+        scene_layout.addWidget(self.projection_combo)
+        scene_layout.addWidget(QLabel("Visual Preset:"))
+        self.visual_preset_combo = QComboBox()
+        for label, preset in self.VISUAL_PRESETS:
+            self.visual_preset_combo.addItem(label, preset)
+        self.visual_preset_combo.currentIndexChanged.connect(self._on_visual_preset_changed)
+        scene_layout.addWidget(self.visual_preset_combo)
         self.apply_standard_view_button = QPushButton("Apply View")
         self.apply_standard_view_button.clicked.connect(self._on_standard_view_apply)
         scene_layout.addWidget(self.apply_standard_view_button)
@@ -98,6 +118,34 @@ class ControlPanel(QWidget):
         scene_layout.addWidget(self.screenshot_button)
         scene_group.setLayout(scene_layout)
         layout.addWidget(scene_group)
+
+        section_group = QGroupBox("Section Plane")
+        section_layout = QVBoxLayout()
+        self.section_plane_checkbox = QCheckBox("Enable Section Plane")
+        self.section_plane_checkbox.toggled.connect(self._on_section_plane_enabled_toggled)
+        section_layout.addWidget(self.section_plane_checkbox)
+        section_layout.addWidget(QLabel("Section Axis:"))
+        self.section_plane_axis_combo = QComboBox()
+        for label, axis in self.SECTION_AXES:
+            self.section_plane_axis_combo.addItem(label, axis)
+        self.section_plane_axis_combo.currentIndexChanged.connect(self._on_section_plane_axis_changed)
+        section_layout.addWidget(self.section_plane_axis_combo)
+        self.section_plane_offset_label = QLabel("Offset: 0.00")
+        self.section_plane_offset_slider = QSlider(Qt.Horizontal)
+        self.section_plane_offset_slider.setMinimum(-100)
+        self.section_plane_offset_slider.setMaximum(100)
+        self.section_plane_offset_slider.setValue(0)
+        self.section_plane_offset_slider.valueChanged.connect(self._on_section_plane_offset_changed)
+        section_layout.addWidget(self.section_plane_offset_label)
+        section_layout.addWidget(self.section_plane_offset_slider)
+        self.section_plane_invert_checkbox = QCheckBox("Invert Cut Direction")
+        self.section_plane_invert_checkbox.toggled.connect(self._on_section_plane_inverted_toggled)
+        section_layout.addWidget(self.section_plane_invert_checkbox)
+        self.section_plane_reset_button = QPushButton("Reset Section Plane")
+        self.section_plane_reset_button.clicked.connect(self._on_section_plane_reset)
+        section_layout.addWidget(self.section_plane_reset_button)
+        section_group.setLayout(section_layout)
+        layout.addWidget(section_group)
 
         inspect_group = QGroupBox("Inspect")
         inspect_layout = QVBoxLayout()
@@ -194,6 +242,17 @@ class ControlPanel(QWidget):
         self.mesh_color_combo.addItems(["Uniform", "Vertex Color"])
         self.mesh_color_combo.currentIndexChanged.connect(self._on_mesh_color_mode_changed)
         mesh_layout.addWidget(self.mesh_color_combo)
+        self.mesh_opacity_label = QLabel("Opacity: 1.00")
+        self.mesh_opacity_slider = QSlider(Qt.Horizontal)
+        self.mesh_opacity_slider.setMinimum(5)
+        self.mesh_opacity_slider.setMaximum(100)
+        self.mesh_opacity_slider.setValue(100)
+        self.mesh_opacity_slider.valueChanged.connect(self._on_mesh_opacity_changed)
+        mesh_layout.addWidget(self.mesh_opacity_label)
+        mesh_layout.addWidget(self.mesh_opacity_slider)
+        self.backface_culling_checkbox = QCheckBox("Cull Back Faces")
+        self.backface_culling_checkbox.toggled.connect(self._on_backface_culling_toggled)
+        mesh_layout.addWidget(self.backface_culling_checkbox)
         self.line_width_label = QLabel("Line Width: 2.0")
         self.line_width_slider = QSlider(Qt.Horizontal)
         self.line_width_slider.setMinimum(10)
@@ -221,6 +280,14 @@ class ControlPanel(QWidget):
         self.point_size_slider.valueChanged.connect(self._on_point_size_changed)
         pc_layout.addWidget(self.point_size_label)
         pc_layout.addWidget(self.point_size_slider)
+        self.point_opacity_label = QLabel("Opacity: 1.00")
+        self.point_opacity_slider = QSlider(Qt.Horizontal)
+        self.point_opacity_slider.setMinimum(5)
+        self.point_opacity_slider.setMaximum(100)
+        self.point_opacity_slider.setValue(100)
+        self.point_opacity_slider.valueChanged.connect(self._on_point_opacity_changed)
+        pc_layout.addWidget(self.point_opacity_label)
+        pc_layout.addWidget(self.point_opacity_slider)
         self.pc_group.setLayout(pc_layout)
         self.pc_group.setVisible(False)
         layout.addWidget(self.pc_group)
@@ -306,6 +373,56 @@ class ControlPanel(QWidget):
         self._set_combo_data(self.pick_mode_combo, snapshot.get('pick_mode'))
         self._set_combo_data(self.pick_preference_combo, snapshot.get('pick_preference'))
         self._set_combo_data(self.action_mode_combo, snapshot.get('action_mode'))
+        self._set_combo_data(self.projection_combo, snapshot.get('projection_mode'))
+        self._set_combo_data(self.visual_preset_combo, snapshot.get('visual_preset'))
+        self._set_combo_data(self.section_plane_axis_combo, snapshot.get('section_plane_axis'))
+        self._set_combo_text(self.mesh_render_combo, {
+            'surface': "Surface",
+            'wireframe': "Wireframe",
+            'surface+wireframe': "Surface+Wireframe",
+        }.get(snapshot.get('render_mode')))
+        self._set_combo_text(self.mesh_color_combo, {
+            'uniform': "Uniform",
+            'vertex': "Vertex Color",
+        }.get(snapshot.get('color_mode')))
+        mesh_opacity = float(snapshot.get('mesh_opacity', 1.0))
+        self.mesh_opacity_slider.blockSignals(True)
+        self.mesh_opacity_slider.setValue(int(round(mesh_opacity * 100.0)))
+        self.mesh_opacity_slider.blockSignals(False)
+        self.mesh_opacity_label.setText(f"Opacity: {mesh_opacity:.2f}")
+        point_opacity = float(snapshot.get('point_opacity', 1.0))
+        self.point_opacity_slider.blockSignals(True)
+        self.point_opacity_slider.setValue(int(round(point_opacity * 100.0)))
+        self.point_opacity_slider.blockSignals(False)
+        self.point_opacity_label.setText(f"Opacity: {point_opacity:.2f}")
+        point_size = float(snapshot.get('point_size', 2.0))
+        self.point_size_slider.blockSignals(True)
+        self.point_size_slider.setValue(int(round(point_size * 10.0)))
+        self.point_size_slider.blockSignals(False)
+        self.point_size_label.setText(f"Point Size: {point_size:.1f}")
+        line_width = float(snapshot.get('line_width', 2.0))
+        self.line_width_slider.blockSignals(True)
+        self.line_width_slider.setValue(int(round(line_width * 10.0)))
+        self.line_width_slider.blockSignals(False)
+        self.line_width_label.setText(f"Line Width: {line_width:.1f}")
+        self.backface_culling_checkbox.blockSignals(True)
+        self.backface_culling_checkbox.setChecked(bool(snapshot.get('backface_culling', False)))
+        self.backface_culling_checkbox.blockSignals(False)
+        section_plane_enabled = bool(snapshot.get('section_plane_enabled', False))
+        section_plane_offset = float(snapshot.get('section_plane_offset_ratio', 0.0))
+        self.section_plane_checkbox.blockSignals(True)
+        self.section_plane_checkbox.setChecked(section_plane_enabled)
+        self.section_plane_checkbox.blockSignals(False)
+        self.section_plane_offset_slider.blockSignals(True)
+        self.section_plane_offset_slider.setValue(int(round(section_plane_offset * 100.0)))
+        self.section_plane_offset_slider.blockSignals(False)
+        self.section_plane_offset_label.setText(f"Offset: {section_plane_offset:+.2f}")
+        self.section_plane_invert_checkbox.blockSignals(True)
+        self.section_plane_invert_checkbox.setChecked(bool(snapshot.get('section_plane_inverted', False)))
+        self.section_plane_invert_checkbox.blockSignals(False)
+        self.section_plane_axis_combo.setEnabled(section_plane_enabled)
+        self.section_plane_offset_slider.setEnabled(section_plane_enabled)
+        self.section_plane_invert_checkbox.setEnabled(section_plane_enabled)
         self._refresh_group_list(snapshot)
         self._refresh_measurement_list(snapshot)
         self._refresh_stats(snapshot.get('stats', {}))
@@ -313,6 +430,15 @@ class ControlPanel(QWidget):
 
     def _set_combo_data(self, combo, value):
         index = combo.findData(value)
+        if index >= 0:
+            combo.blockSignals(True)
+            combo.setCurrentIndex(index)
+            combo.blockSignals(False)
+
+    def _set_combo_text(self, combo, value):
+        if not value:
+            return
+        index = combo.findText(value)
         if index >= 0:
             combo.blockSignals(True)
             combo.setCurrentIndex(index)
@@ -458,6 +584,42 @@ class ControlPanel(QWidget):
         if self._call_main_window('set_show_grid', checked) is None:
             self.gl_widget.set_show_grid(checked)
 
+    def _on_projection_changed(self, index):
+        projection_mode = self.projection_combo.itemData(index)
+        if self._call_main_window('set_projection_mode', projection_mode) is None:
+            self.gl_widget.set_projection_mode(projection_mode)
+
+    def _on_visual_preset_changed(self, index):
+        preset_name = self.visual_preset_combo.itemData(index)
+        if self._call_main_window('set_visual_preset', preset_name) is None:
+            self.gl_widget.set_visual_preset(preset_name)
+
+    def _on_section_plane_enabled_toggled(self, checked):
+        self.section_plane_axis_combo.setEnabled(bool(checked))
+        self.section_plane_offset_slider.setEnabled(bool(checked))
+        self.section_plane_invert_checkbox.setEnabled(bool(checked))
+        if self._call_main_window('set_section_plane_enabled', checked) is None:
+            self.gl_widget.set_section_plane_enabled(checked)
+
+    def _on_section_plane_axis_changed(self, index):
+        axis = self.section_plane_axis_combo.itemData(index)
+        if self._call_main_window('set_section_plane_axis', axis) is None:
+            self.gl_widget.set_section_plane_axis(axis)
+
+    def _on_section_plane_offset_changed(self, value):
+        offset_ratio = value / 100.0
+        self.section_plane_offset_label.setText(f"Offset: {offset_ratio:+.2f}")
+        if self._call_main_window('set_section_plane_offset_ratio', offset_ratio) is None:
+            self.gl_widget.set_section_plane_offset_ratio(offset_ratio)
+
+    def _on_section_plane_inverted_toggled(self, checked):
+        if self._call_main_window('set_section_plane_inverted', checked) is None:
+            self.gl_widget.set_section_plane_inverted(checked)
+
+    def _on_section_plane_reset(self):
+        if self._call_main_window('reset_section_plane') is None:
+            self.gl_widget.reset_section_plane()
+
     def _on_pick_mode_changed(self, index):
         self.gl_widget.set_inspection_pick_mode(self.pick_mode_combo.itemData(index))
 
@@ -556,9 +718,27 @@ class ControlPanel(QWidget):
     def _on_point_size_changed(self, value):
         size = value / 10.0
         self.point_size_label.setText(f"Point Size: {size:.1f}")
-        self.gl_widget.set_point_size(size)
+        if self._call_main_window('set_point_size', size) is None:
+            self.gl_widget.set_point_size(size)
 
     def _on_line_width_changed(self, value):
         width = value / 10.0
         self.line_width_label.setText(f"Line Width: {width:.1f}")
-        self.gl_widget.set_line_width(width)
+        if self._call_main_window('set_line_width', width) is None:
+            self.gl_widget.set_line_width(width)
+
+    def _on_mesh_opacity_changed(self, value):
+        opacity = value / 100.0
+        self.mesh_opacity_label.setText(f"Opacity: {opacity:.2f}")
+        if self._call_main_window('set_mesh_opacity', opacity) is None:
+            self.gl_widget.set_mesh_opacity(opacity)
+
+    def _on_point_opacity_changed(self, value):
+        opacity = value / 100.0
+        self.point_opacity_label.setText(f"Opacity: {opacity:.2f}")
+        if self._call_main_window('set_point_opacity', opacity) is None:
+            self.gl_widget.set_point_opacity(opacity)
+
+    def _on_backface_culling_toggled(self, checked):
+        if self._call_main_window('set_backface_culling', checked) is None:
+            self.gl_widget.set_backface_culling(checked)

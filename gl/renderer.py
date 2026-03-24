@@ -22,6 +22,32 @@ class Renderer:
         'bottom': (np.array([0.0, -1.0, 0.0], dtype=np.float32), np.array([0.0, 0.0, 1.0], dtype=np.float32)),
         'isometric': (np.array([1.0, 1.0, 1.0], dtype=np.float32) / np.sqrt(3.0), np.array([0.0, 1.0, 0.0], dtype=np.float32)),
     }
+    VISUAL_PRESETS = {
+        'studio_dark': {
+            'background': (0.12, 0.13, 0.16, 1.0),
+            'ambient': (0.24, 0.24, 0.26, 1.0),
+            'diffuse': (1.0, 1.0, 1.0, 1.0),
+            'position': (2.5, 2.5, 2.0, 1.0),
+        },
+        'studio_light': {
+            'background': (0.88, 0.91, 0.95, 1.0),
+            'ambient': (0.52, 0.52, 0.52, 1.0),
+            'diffuse': (0.94, 0.94, 0.94, 1.0),
+            'position': (2.0, 3.0, 2.0, 1.0),
+        },
+        'blueprint': {
+            'background': (0.08, 0.16, 0.24, 1.0),
+            'ambient': (0.18, 0.24, 0.30, 1.0),
+            'diffuse': (0.86, 0.95, 1.0, 1.0),
+            'position': (1.5, 2.8, 2.4, 1.0),
+        },
+        'inspection_lab': {
+            'background': (0.15, 0.16, 0.15, 1.0),
+            'ambient': (0.30, 0.32, 0.30, 1.0),
+            'diffuse': (1.0, 0.98, 0.92, 1.0),
+            'position': (3.2, 2.2, 1.6, 1.0),
+        },
+    }
 
     def __init__(self, width=800, height=600):
         self.camera = Camera(width, height)
@@ -29,6 +55,14 @@ class Renderer:
         self.data_type = None
         self.render_mode = 'surface'
         self.color_mode = 'uniform'
+        self.mesh_opacity = 1.0
+        self.point_opacity = 1.0
+        self.backface_culling = False
+        self.visual_preset = 'studio_dark'
+        self.section_plane_enabled = False
+        self.section_plane_axis = 'z'
+        self.section_plane_offset_ratio = 0.0
+        self.section_plane_inverted = False
         self.point_size = 2.0
         self.line_width = 2.0
         self.vertices = None
@@ -81,16 +115,21 @@ class Renderer:
     def initialize(self):
         glEnable(GL_DEPTH_TEST)
         glDepthFunc(GL_LESS)
-        glClearColor(0.2, 0.2, 0.2, 1.0)
         glEnable(GL_LIGHTING)
         glEnable(GL_LIGHT0)
-        glLightfv(GL_LIGHT0, GL_POSITION, [2.0, 2.0, 2.0, 1.0])
-        glLightfv(GL_LIGHT0, GL_DIFFUSE, [1.0, 1.0, 1.0, 1.0])
-        glLightfv(GL_LIGHT0, GL_AMBIENT, [0.2, 0.2, 0.2, 1.0])
         glEnable(GL_COLOR_MATERIAL)
         glColorMaterial(GL_FRONT_AND_BACK, GL_AMBIENT_AND_DIFFUSE)
+        glShadeModel(GL_SMOOTH)
         self.initialized = True
+        self._apply_visual_preset()
         self._update_helper_buffers()
+
+    def _apply_visual_preset(self):
+        preset = self.VISUAL_PRESETS.get(self.visual_preset, self.VISUAL_PRESETS['studio_dark'])
+        glClearColor(*preset['background'])
+        glLightfv(GL_LIGHT0, GL_POSITION, preset['position'])
+        glLightfv(GL_LIGHT0, GL_DIFFUSE, preset['diffuse'])
+        glLightfv(GL_LIGHT0, GL_AMBIENT, preset['ambient'])
 
     def _delete_buffer(self, buffer_id):
         if buffer_id is not None:
@@ -133,7 +172,7 @@ class Renderer:
         if self.normals is not None and len(self.normals) == len(self.vertices):
             self.normal_vbo = self._upload_buffer(GL_ARRAY_BUFFER, self.normals.astype(np.float32))
         if self.colors is not None and len(self.colors) == len(self.vertices):
-            self.color_vbo = self._upload_buffer(GL_ARRAY_BUFFER, self.colors.astype(np.float32))
+            self.color_vbo = self._upload_buffer(GL_ARRAY_BUFFER, self._build_display_colors())
         if self.indices is not None and len(self.indices) > 0:
             self.index_ebo = self._upload_buffer(GL_ELEMENT_ARRAY_BUFFER, self.indices.astype(np.uint32))
             self.index_count = int(len(self.indices))
@@ -141,6 +180,27 @@ class Renderer:
             self.edge_ebo = self._upload_buffer(GL_ELEMENT_ARRAY_BUFFER, self.edges.astype(np.uint32))
             self.edge_count = int(len(self.edges))
         self.gpu_dirty = False
+
+    def _build_display_colors(self):
+        """Build RGBA colors for the current geometry upload."""
+        colors = np.asarray(self.colors, dtype=np.float32)
+        if colors.ndim != 2 or colors.shape[1] not in {3, 4}:
+            return colors.astype(np.float32)
+
+        if self.data_type == 'mesh':
+            alpha = self.mesh_opacity
+        elif self.data_type == 'point_cloud':
+            alpha = self.point_opacity
+        else:
+            alpha = 1.0
+
+        if colors.shape[1] == 3:
+            alpha_column = np.full((len(colors), 1), alpha, dtype=np.float32)
+            return np.hstack([colors[:, :3], alpha_column]).astype(np.float32)
+
+        display_colors = colors.astype(np.float32).copy()
+        display_colors[:, 3] = alpha
+        return display_colors
 
     def _nice_step(self, raw_step):
         raw_step = max(raw_step, 1e-3)
@@ -294,10 +354,12 @@ class Renderer:
 
     def _apply_camera_distance(self, distance):
         self.camera.scale = 1.0
+        self.camera.ortho_scale = max(self.scene_radius * 1.15, 1.0)
         self._update_clip_planes(distance)
 
     def fit_view(self):
         self.camera.reset()
+        self.camera.set_projection_mode(self.camera.projection_mode)
         self.trackball.reset()
         distance = self._fit_distance()
         self.camera.position = np.array([0.0, 0.0, distance], dtype=np.float32)
@@ -318,6 +380,49 @@ class Renderer:
         self.camera.target = np.array([0.0, 0.0, 0.0], dtype=np.float32)
         self.camera.up = up.astype(np.float32)
         self._apply_camera_distance(distance)
+
+    def set_projection_mode(self, mode):
+        if mode not in {'perspective', 'orthographic'}:
+            return
+        if mode == self.camera.projection_mode:
+            return
+        offset = self.camera.position - self.camera.target
+        distance = np.linalg.norm(offset)
+        direction = offset / distance if distance > 1e-6 else np.array([0.0, 0.0, 1.0], dtype=np.float32)
+        if mode == 'orthographic':
+            self.camera.sync_ortho_scale_from_distance()
+        else:
+            target_distance = max(self.camera.ortho_scale / np.tan(np.radians(self.camera.fov) / 2.0), 1e-3)
+            self.camera.position = self.camera.target + direction * target_distance
+            distance = target_distance
+        self.camera.set_projection_mode(mode)
+        self._update_clip_planes(distance)
+
+    def set_visual_preset(self, preset_name):
+        if preset_name not in self.VISUAL_PRESETS:
+            return
+        self.visual_preset = preset_name
+        if self.initialized:
+            self._apply_visual_preset()
+
+    def set_section_plane_enabled(self, enabled):
+        self.section_plane_enabled = bool(enabled)
+
+    def set_section_plane_axis(self, axis):
+        if axis in {'x', 'y', 'z'}:
+            self.section_plane_axis = axis
+
+    def set_section_plane_offset_ratio(self, ratio):
+        self.section_plane_offset_ratio = max(-1.0, min(1.0, float(ratio)))
+
+    def set_section_plane_inverted(self, inverted):
+        self.section_plane_inverted = bool(inverted)
+
+    def reset_section_plane(self):
+        self.section_plane_enabled = False
+        self.section_plane_axis = 'z'
+        self.section_plane_offset_ratio = 0.0
+        self.section_plane_inverted = False
 
     def set_show_axes(self, show):
         self.show_axes = bool(show)
@@ -695,7 +800,7 @@ class Renderer:
         glDisableClientState(GL_COLOR_ARRAY)
 
     def _render_helpers(self):
-        if not self.show_axes and not self.show_grid:
+        if not self.show_axes and not self.show_grid and not self.section_plane_enabled:
             return
         glPushAttrib(GL_ALL_ATTRIB_BITS)
         glDisable(GL_LIGHTING)
@@ -703,6 +808,8 @@ class Renderer:
             self._draw_line_buffer(self.grid_vbo, self.grid_color_vbo, self.grid_count, 1.0)
         if self.show_axes:
             self._draw_line_buffer(self.axes_vbo, self.axes_color_vbo, self.axes_count, 2.0)
+        if self.section_plane_enabled:
+            self._render_section_plane_overlay()
         glPopAttrib()
 
     def _draw_lines_immediate(self, vertices, color, width=1.0):
@@ -745,11 +852,100 @@ class Renderer:
         for point in triangle_points:
             glVertex3f(*point)
         glEnd()
-        glLineWidth(width)
+
+    def _section_axis_index(self):
+        return {'x': 0, 'y': 1, 'z': 2}.get(self.section_plane_axis, 2)
+
+    def _section_plane_extent(self):
+        axis_index = self._section_axis_index()
+        minimum = self.model_bbox_min[axis_index]
+        maximum = self.model_bbox_max[axis_index]
+        center = (minimum + maximum) * 0.5
+        half_extent = max((maximum - minimum) * 0.5, 1e-3)
+        return center, half_extent
+
+    def _section_plane_position(self):
+        center, half_extent = self._section_plane_extent()
+        return float(center + self.section_plane_offset_ratio * half_extent)
+
+    def _section_plane_normal(self):
+        normal = np.zeros(3, dtype=np.float64)
+        normal[self._section_axis_index()] = -1.0 if self.section_plane_inverted else 1.0
+        return normal
+
+    def _section_plane_equation(self):
+        normal = self._section_plane_normal()
+        position = self._section_plane_position()
+        axis_index = self._section_axis_index()
+        point = np.zeros(3, dtype=np.float64)
+        point[axis_index] = position
+        d_term = -float(np.dot(normal, point))
+        return [float(normal[0]), float(normal[1]), float(normal[2]), d_term]
+
+    def _section_plane_color(self):
+        return {'x': (1.0, 0.35, 0.35), 'y': (0.35, 1.0, 0.45), 'z': (0.35, 0.55, 1.0)}.get(self.section_plane_axis, (0.9, 0.9, 0.9))
+
+    def _render_section_plane_overlay(self):
+        if self.vertices is None or len(self.vertices) == 0:
+            return
+        axis_index = self._section_axis_index()
+        position = self._section_plane_position()
+        padding = max(self.scene_radius * 0.04, 0.02)
+        minimum = self.model_bbox_min - padding
+        maximum = self.model_bbox_max + padding
+        color = self._section_plane_color()
+
+        if axis_index == 0:
+            corners = np.array([
+                [position, minimum[1], minimum[2]],
+                [position, maximum[1], minimum[2]],
+                [position, maximum[1], maximum[2]],
+                [position, minimum[1], maximum[2]],
+            ], dtype=np.float32)
+        elif axis_index == 1:
+            corners = np.array([
+                [minimum[0], position, minimum[2]],
+                [maximum[0], position, minimum[2]],
+                [maximum[0], position, maximum[2]],
+                [minimum[0], position, maximum[2]],
+            ], dtype=np.float32)
+        else:
+            corners = np.array([
+                [minimum[0], minimum[1], position],
+                [maximum[0], minimum[1], position],
+                [maximum[0], maximum[1], position],
+                [minimum[0], maximum[1], position],
+            ], dtype=np.float32)
+
+        glEnable(GL_BLEND)
+        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA)
+        glColor4f(color[0], color[1], color[2], 0.12)
+        glBegin(GL_QUADS)
+        for corner in corners:
+            glVertex3f(*corner)
+        glEnd()
+
+        glLineWidth(1.5)
         glColor3f(*color)
         glBegin(GL_LINE_LOOP)
-        for point in triangle_points:
-            glVertex3f(*point)
+        for corner in corners:
+            glVertex3f(*corner)
+        glEnd()
+
+    def _enable_section_plane(self):
+        if not self.section_plane_enabled or self.vertices is None or len(self.vertices) == 0:
+            glDisable(GL_CLIP_PLANE0)
+            return
+        glClipPlane(GL_CLIP_PLANE0, self._section_plane_equation())
+        glEnable(GL_CLIP_PLANE0)
+
+    def _disable_section_plane(self):
+        glDisable(GL_CLIP_PLANE0)
+        # glLineWidth(width)
+        # glColor3f(*color)
+        glBegin(GL_LINE_LOOP)
+        # for point in triangle_points:
+        #     glVertex3f(*point)
         glEnd()
 
     def _render_bounding_box(self):
@@ -857,20 +1053,35 @@ class Renderer:
         glMatrixMode(GL_MODELVIEW)
         glLoadIdentity()
         glMultMatrixf((self.camera.get_view_matrix() @ self._get_model_matrix()).T.flatten())
+        self._enable_section_plane()
         if self.data_type == 'mesh':
             self._render_mesh()
         elif self.data_type == 'point_cloud':
             self._render_point_cloud()
+        self._disable_section_plane()
         self._render_helpers()
         self._render_inspection_overlays()
 
     def _render_mesh(self):
+        use_transparency = self.mesh_opacity < 0.999 and self.render_mode in {'surface', 'surface+wireframe'}
+        if self.backface_culling:
+            glEnable(GL_CULL_FACE)
+            glCullFace(GL_BACK)
+        else:
+            glDisable(GL_CULL_FACE)
         if self.color_mode == 'uniform':
-            glColor3f(0.8, 0.8, 0.8)
+            glColor4f(0.8, 0.8, 0.8, self.mesh_opacity)
         if self.render_mode == 'surface':
             glPolygonMode(GL_FRONT_AND_BACK, GL_FILL)
             glEnable(GL_LIGHTING)
+            if use_transparency:
+                glEnable(GL_BLEND)
+                glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA)
+                glDepthMask(GL_FALSE)
             self._draw_mesh_elements()
+            if use_transparency:
+                glDepthMask(GL_TRUE)
+                glDisable(GL_BLEND)
         elif self.render_mode == 'wireframe':
             glPolygonMode(GL_FRONT_AND_BACK, GL_LINE)
             glLineWidth(self.line_width)
@@ -879,7 +1090,14 @@ class Renderer:
         elif self.render_mode == 'surface+wireframe':
             glPolygonMode(GL_FRONT_AND_BACK, GL_FILL)
             glEnable(GL_LIGHTING)
+            if use_transparency:
+                glEnable(GL_BLEND)
+                glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA)
+                glDepthMask(GL_FALSE)
             self._draw_mesh_elements()
+            if use_transparency:
+                glDepthMask(GL_TRUE)
+                glDisable(GL_BLEND)
             glPushAttrib(GL_ALL_ATTRIB_BITS)
             glDisable(GL_LIGHTING)
             glColor3f(0.0, 0.0, 0.0)
@@ -887,6 +1105,7 @@ class Renderer:
             glLineWidth(self.line_width)
             self._draw_wireframe_elements()
             glPopAttrib()
+        glDisable(GL_CULL_FACE)
 
     def _draw_mesh_elements(self):
         if self.vertex_vbo is None or self.index_ebo is None or self.index_count == 0:
@@ -903,7 +1122,7 @@ class Renderer:
         if self.color_mode == 'vertex' and self.color_vbo is not None:
             glEnableClientState(GL_COLOR_ARRAY)
             glBindBuffer(GL_ARRAY_BUFFER, self.color_vbo)
-            glColorPointer(3, GL_FLOAT, 0, ctypes.c_void_p(0))
+            glColorPointer(4, GL_FLOAT, 0, ctypes.c_void_p(0))
         else:
             glDisableClientState(GL_COLOR_ARRAY)
         glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, self.index_ebo)
@@ -928,7 +1147,7 @@ class Renderer:
         if self.color_mode == 'vertex' and self.color_vbo is not None:
             glEnableClientState(GL_COLOR_ARRAY)
             glBindBuffer(GL_ARRAY_BUFFER, self.color_vbo)
-            glColorPointer(3, GL_FLOAT, 0, ctypes.c_void_p(0))
+            glColorPointer(4, GL_FLOAT, 0, ctypes.c_void_p(0))
         else:
             glDisableClientState(GL_COLOR_ARRAY)
         glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, edge_buffer)
@@ -941,7 +1160,12 @@ class Renderer:
     def _render_point_cloud(self):
         if self.vertex_vbo is None:
             return
+        use_transparency = self.point_opacity < 0.999
         glDisable(GL_LIGHTING)
+        if use_transparency:
+            glEnable(GL_BLEND)
+            glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA)
+            glDepthMask(GL_FALSE)
         glPointSize(self.point_size)
         glEnableClientState(GL_VERTEX_ARRAY)
         glBindBuffer(GL_ARRAY_BUFFER, self.vertex_vbo)
@@ -949,13 +1173,17 @@ class Renderer:
         if self.color_vbo is not None:
             glEnableClientState(GL_COLOR_ARRAY)
             glBindBuffer(GL_ARRAY_BUFFER, self.color_vbo)
-            glColorPointer(3, GL_FLOAT, 0, ctypes.c_void_p(0))
+            glColorPointer(4, GL_FLOAT, 0, ctypes.c_void_p(0))
         else:
             glDisableClientState(GL_COLOR_ARRAY)
+            glColor4f(0.85, 0.85, 0.85, self.point_opacity)
         glDrawArrays(GL_POINTS, 0, len(self.vertices))
         glBindBuffer(GL_ARRAY_BUFFER, 0)
         glDisableClientState(GL_VERTEX_ARRAY)
         glDisableClientState(GL_COLOR_ARRAY)
+        if use_transparency:
+            glDepthMask(GL_TRUE)
+            glDisable(GL_BLEND)
 
     def resize(self, width, height):
         self.camera.set_aspect_ratio(width, height)
@@ -979,8 +1207,26 @@ class Renderer:
         if mode in {'uniform', 'vertex'}:
             self.color_mode = mode
 
+    def set_mesh_opacity(self, opacity):
+        """Set mesh opacity in the range [0.05, 1.0]."""
+        self.mesh_opacity = max(0.05, min(1.0, float(opacity)))
+        if self.data_type == 'mesh' and self.colors is not None:
+            self.gpu_dirty = True
+
+    def set_point_opacity(self, opacity):
+        """Set point-cloud opacity in the range [0.05, 1.0]."""
+        self.point_opacity = max(0.05, min(1.0, float(opacity)))
+        if self.data_type == 'point_cloud' and self.colors is not None:
+            self.gpu_dirty = True
+
+    def set_backface_culling(self, enabled):
+        self.backface_culling = bool(enabled)
+
     def set_point_size(self, size):
-        self.point_size = max(0.5, min(10.0, size))
+        self.point_size = max(0.5, min(10.0, float(size)))
+
+    def set_line_width(self, width):
+        self.line_width = max(0.5, min(10.0, float(width)))
 
     def get_camera_state(self):
         return {
@@ -988,6 +1234,8 @@ class Renderer:
             'target': [float(value) for value in self.camera.target],
             'up': [float(value) for value in self.camera.up],
             'fov': float(self.camera.fov),
+            'projection_mode': self.camera.projection_mode,
+            'ortho_scale': float(self.camera.ortho_scale),
             'near': float(self.camera.near),
             'far': float(self.camera.far),
             'trackball_matrix': self.trackball.get_matrix().astype(float).tolist(),
@@ -1020,6 +1268,19 @@ class Renderer:
         return {
             'inspection_mode': bool(self.inspection_mode),
             'pick_preference': self.pick_preference,
+            'render_mode': self.render_mode,
+            'color_mode': self.color_mode,
+            'projection_mode': self.camera.projection_mode,
+            'visual_preset': self.visual_preset,
+            'section_plane_enabled': bool(self.section_plane_enabled),
+            'section_plane_axis': self.section_plane_axis,
+            'section_plane_offset_ratio': float(self.section_plane_offset_ratio),
+            'section_plane_inverted': bool(self.section_plane_inverted),
+            'mesh_opacity': float(self.mesh_opacity),
+            'point_opacity': float(self.point_opacity),
+            'point_size': float(self.point_size),
+            'line_width': float(self.line_width),
+            'backface_culling': bool(self.backface_culling),
             'show_bounding_box': bool(self.show_bounding_box),
             'show_model_center': bool(self.show_model_center),
             'show_vertex_normals': bool(self.show_vertex_normals),
@@ -1055,6 +1316,12 @@ class Renderer:
             'export_time': datetime.now().isoformat(timespec='seconds'),
             'camera_state': self.get_camera_state(),
             'stats': self._stats_snapshot(),
+            'section_plane': {
+                'enabled': bool(self.section_plane_enabled),
+                'axis': self.section_plane_axis,
+                'offset_ratio': float(self.section_plane_offset_ratio),
+                'inverted': bool(self.section_plane_inverted),
+            },
             'selection': {'selection_type': self.selection_state.selection_type, 'object_id': self.selection_state.object_id, 'label': self.selection_state.label, 'data': self.selection_state.data},
             'groups': groups_payload,
             'screenshot_path': png_path,
